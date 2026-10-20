@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#2a120c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>LETHE · ЛЕТА — Delivery</title>
+<link rel="icon" href="data:,">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;overflow:hidden;background:#1b0d09;color:#f3e6da;
+    font-family:"Rajdhani","Bahnschrift","DIN Alternate","Segoe UI",system-ui,-apple-system,sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none;-webkit-tap-highlight-color:transparent}
+  canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
+  .ov{position:fixed;inset:0;pointer-events:none}
+  #tintUnder{background:radial-gradient(ellipse at center,rgba(20,140,130,.08) 30%,rgba(0,40,45,.55) 100%);opacity:0;transition:opacity .25s}
+  #tintRad{background:radial-gradient(ellipse at center,rgba(255,30,0,.10) 20%,rgba(190,10,0,.38) 65%,rgba(120,0,0,.75) 100%);opacity:0}
+  #tintHit{background:radial-gradient(ellipse at center,transparent 40%,rgba(255,120,40,.55) 100%);opacity:0}
+  #vignette{background:radial-gradient(ellipse at center,transparent 55%,rgba(20,6,2,.45) 100%)}
+  /* HUD */
+  #hud{position:fixed;inset:0;pointer-events:none;display:none;padding:max(10px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left));
+    font-size:13px;letter-spacing:.06em;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+  .panel{position:absolute;background:linear-gradient(180deg,rgba(18,10,8,.55),rgba(18,10,8,.25));border:1px solid rgba(255,190,120,.22);
+    border-radius:6px;padding:7px 10px;backdrop-filter:blur(2px)}
+  #pL{left:max(12px,env(safe-area-inset-left));top:10px;width:210px}
+  #pR{right:max(12px,env(safe-area-inset-right));top:10px;width:180px;text-align:right}
+  .row{margin:2px 0 5px}
+  .lbl{font-size:10.5px;opacity:.85;display:flex;justify-content:space-between}
+  .lbl b{font-weight:600;color:#fff}
+  .lbl i{font-style:normal;opacity:.6}
+  .bar{height:6px;background:rgba(255,255,255,.12);border-radius:3px;overflow:hidden;margin-top:2px}
+  .bar>div{height:100%;width:100%;transform-origin:left;background:linear-gradient(90deg,#ffb35a,#ffd79a)}
+  #bCargo>div{background:linear-gradient(90deg,#2fc7c0,#8ff2e6)}
+  #bHealth>div{background:linear-gradient(90deg,#f0a050,#ffe0a0)}
+  #bRad>div{background:linear-gradient(90deg,#ff5030,#ff9a60)}
+  .big{font-size:22px;font-weight:600;color:#fff;letter-spacing:.04em}
+  .unit{font-size:11px;opacity:.7}
+  #route{position:absolute;left:50%;top:12px;transform:translateX(-50%);width:min(38vw,420px);height:22px}
+  #routeBar{position:absolute;left:14px;right:14px;top:9px;height:4px;background:rgba(255,255,255,.12);border-radius:2px}
+  #routeBar .z{position:absolute;top:0;height:4px;background:rgba(90,220,255,.55)}
+  #routeBar .z.off{background:#ff4a2a;box-shadow:0 0 6px #ff4a2a}
+  #routeShip{position:absolute;top:-4px;width:3px;height:12px;background:#ffd28a;box-shadow:0 0 6px #ffb050;margin-left:-1px}
+  #route .ab{position:absolute;top:3px;font-size:11px;font-weight:700}
+  #airBox{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);width:min(40vw,320px);opacity:0;transition:opacity .3s}
+  #bAir>div{background:linear-gradient(90deg,#3ff,#bff)}
+  #airBox.low #bAir>div{background:linear-gradient(90deg,#f42,#fa6)}
+  #msg{position:absolute;left:50%;top:30%;transform:translate(-50%,-50%);text-align:center;font-size:20px;font-weight:600;letter-spacing:.12em;
+    opacity:0;transition:opacity .3s;white-space:nowrap}
+  #msg small{display:block;font-size:13px;opacity:.75;font-weight:500}
+  #pop{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);font-size:16px;font-weight:700;color:#ffd28a;opacity:0}
+  #reticle{position:absolute;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;border:1.5px solid rgba(255,220,160,.55);border-radius:50%}
+  #reticle::before,#reticle::after{content:"";position:absolute;background:rgba(255,220,160,.8)}
+  #reticle::before{left:50%;top:-6px;width:1.5px;height:8px;margin-left:-.75px}
+  #reticle::after{top:50%;left:-6px;height:1.5px;width:8px;margin-top:-.75px}
+  #reticle.lock{border-color:#ff8a40;box-shadow:0 0 8px rgba(255,120,40,.6)}
+  #reticle.warn{border-color:#5ef}
+  #radWarn{color:#ff6a4a;font-weight:700}
+  /* touch controls */
+  #touch{position:fixed;inset:0;display:none;pointer-events:none}
+  .touch.playing #touch{display:block}
+  #stickZone{position:absolute;left:0;top:18%;bottom:0;width:46%;pointer-events:auto;touch-action:none}
+  #stickBase{position:fixed;left:15%;top:72%;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;border:2px solid rgba(255,210,160,.25);
+    background:radial-gradient(circle,rgba(255,200,140,.06),rgba(255,200,140,.12));opacity:.55}
+  #stickBase.active{opacity:1}
+  #stickKnob{position:absolute;left:50%;top:50%;width:54px;height:54px;transform:translate(-50%,-50%);border-radius:50%;background:rgba(255,215,170,.35);border:2px solid rgba(255,230,200,.6)}
+  .tbtn{position:absolute;pointer-events:auto;touch-action:none;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;
+    font-weight:700;font-size:13px;letter-spacing:.08em;color:#fff;border:2px solid rgba(255,220,180,.45);background:rgba(40,18,10,.35);backdrop-filter:blur(2px)}
+  .tbtn small{font-size:9px;opacity:.7;font-weight:500}
+  .tbtn.on{background:rgba(255,150,60,.45);border-color:#ffd0a0}
+  #btnFire{right:calc(28px + env(safe-area-inset-right));bottom:34px;width:104px;height:104px;border-color:rgba(255,140,80,.7)}
+  #btnDive{right:calc(150px + env(safe-area-inset-right));bottom:22px;width:78px;height:78px;border-color:rgba(80,230,230,.7)}
+  #btnDive.under{background:rgba(30,160,160,.5)}
+  #btnBoost{right:calc(38px + env(safe-area-inset-right));bottom:158px;width:72px;height:72px}
+  #btnTilt{left:50%;top:44px;transform:translateX(-50%);width:auto;height:26px;border-radius:13px;padding:0 12px;font-size:11px;flex-direction:row;gap:6px}
+  /* screens */
+  .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:safe center;flex-direction:column;text-align:center;
+    background:radial-gradient(ellipse at 50% 40%,rgba(60,22,12,.55),rgba(14,6,4,.92));z-index:10;padding:16px;overflow:auto}
+  .title{font-size:clamp(34px,7vw,64px);font-weight:700;letter-spacing:.32em;color:#ffe2c2;text-shadow:0 0 24px rgba(255,140,60,.45)}
+  .sub{font-size:clamp(13px,2.2vw,18px);letter-spacing:.3em;color:#ffb070;margin:4px 0 14px}
+  .brief{max-width:720px;font-size:clamp(12px,1.8vw,15px);line-height:1.45;opacity:.92}
+  .brief .ru{opacity:.65;font-size:.92em}
+  .ctl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 26px;margin:14px auto;max-width:760px;font-size:clamp(11px,1.6vw,13.5px);text-align:left}
+  .ctl h4{color:#ffb070;letter-spacing:.15em;font-size:.95em;margin-bottom:3px}
+  .ctl div{opacity:.88}
+  kbd{display:inline-block;border:1px solid rgba(255,220,180,.4);border-radius:3px;padding:0 4px;font-family:inherit;font-size:.92em;background:rgba(255,255,255,.06)}
+  .cta{margin-top:14px;font-size:clamp(15px,2.4vw,20px);letter-spacing:.22em;color:#fff;animation:pulse 1.6s infinite;padding:10px 26px;border:1px solid rgba(255,200,150,.5);border-radius:4px;cursor:pointer;background:rgba(255,140,60,.12)}
+  @keyframes pulse{50%{opacity:.55}}
+  #result{display:none}
+  #result table{margin:12px auto;border-collapse:collapse;font-size:clamp(13px,2vw,17px)}
+  #result td{padding:3px 16px;text-align:left}
+  #result td:last-child{text-align:right;color:#fff;font-weight:600}
+  #result .ok{color:#7ff2d8}#result .bad{color:#ff7a5a}
+  #retry{pointer-events:auto}
+  #rotate{display:none;z-index:20;background:#140805}
+  @media (orientation:portrait) and (max-width:900px){ #rotate{display:flex} }
+  .phone{width:46px;height:80px;border:3px solid #ffb070;border-radius:8px;margin-bottom:16px;animation:rot 2s infinite ease-in-out}
+  @keyframes rot{50%{transform:rotate(-90deg)}}
+  @media (max-height:500px){
+    #hud{font-size:11px} #pL{width:170px} #pR{width:140px} .big{font-size:17px} .panel{padding:4px 8px} .lbl{font-size:9.5px} .row{margin:1px 0 3px}
+    .screen{justify-content:flex-start;padding-top:10px}
+    .title{font-size:30px} .sub{margin:2px 0 6px;font-size:11px} .brief{font-size:11px;line-height:1.3}
+    .ctl{margin:6px auto;font-size:10.5px;gap:2px 20px} .cta{margin-top:6px;padding:6px 18px;font-size:14px}
+    #result table{margin:4px auto;font-size:12px} #result td{padding:1px 12px}
+  }
+</style>
+<script type="importmap">{"imports":{"three":"./lib/three.module.min.js","three/addons/":"./lib/addons/"}}</script>
+</head>
+<body>
+<div id="tintUnder" class="ov"></div>
+<div id="tintRad" class="ov"></div>
+<div id="tintHit" class="ov"></div>
+<div id="vignette" class="ov"></div>
+
+<div id="hud">
+  <div id="reticle"></div>
+  <div class="panel" id="pL">
+    <div class="row"><div class="lbl"><span>CARGO <i>/ ГРУЗ</i></span><b id="tCargo">100%</b></div><div class="bar" id="bCargo"><div></div></div></div>
+    <div class="row"><div class="lbl"><span>HEALTH <i>/ ЗДОРОВЬЕ</i></span><b id="tHealth">100%</b></div><div class="bar" id="bHealth"><div></div></div></div>
+    <div class="row"><div class="lbl"><span>RAD <i>/ РАДИАЦИЯ</i></span><b id="tRad">SHIELDED</b></div><div class="bar" id="bRad"><div></div></div></div>
+  </div>
+  <div class="panel" id="pR">
+    <div class="lbl" style="justify-content:flex-end">SCORE <i>&nbsp;/ ОЧКИ</i></div><div class="big" id="tScore">0</div>
+    <div class="lbl" style="justify-content:flex-end">SPEED <i>&nbsp;/ СКОРОСТЬ</i></div><div><span class="big" id="tSpeed">0</span> <span class="unit">km/h</span></div>
+    <div class="lbl" style="justify-content:flex-end">TO B <i>&nbsp;/ ДО Б</i></div><div><span class="big" id="tDist">0</span> <span class="unit">km</span></div>
+  </div>
+  <div id="route"><span class="ab" style="left:0">A</span><span class="ab" style="right:0">B</span><div id="routeBar"><div id="routeShip"></div></div></div>
+  <div id="airBox"><div class="lbl"><span>AIR <i>/ ВОЗДУХ</i></span><b id="tAir">60s</b></div><div class="bar" id="bAir"><div></div></div></div>
+  <div id="msg"></div>
+  <div id="pop"></div>
+</div>
+
+<div id="touch">
+  <div id="stickZone"></div>
+  <div id="stickBase"><div id="stickKnob"></div></div>
+  <div class="tbtn" id="btnFire">FIRE<small>ОГОНЬ</small></div>
+  <div class="tbtn" id="btnDive">DIVE<small>НЫРОК</small></div>
+  <div class="tbtn" id="btnBoost">BOOST<small>ФОРСАЖ</small></div>
+  <div class="tbtn" id="btnTilt">TILT <small>НАКЛОН</small></div>
+</div>
+
+<div class="screen" id="start">
+  <div class="title">LETHE</div>
+  <div class="sub">ЛЕТА · MISSION 01 — DELIVERY / ДОСТАВКА</div>
+  <div class="brief">
+    Fly the <b>Cormorant</b> down the canyon from settlement <b>A</b> to <b>B</b> with a tank of fresh water.
+    Wall hits crack the cargo. Shoot scout drones and smuggler beacons — but <b>don't hit the cyan field masts</b>:
+    a broken mast drops the radiation shield over its section. Water blocks radiation — dive if you must.<br>
+    <span class="ru">Доставьте воду из А в Б. Удары о стены портят груз. Сбивайте дроны и маяки, но не мачты поля — без поля радиация. Вода защищает.</span>
+  </div>
+  <div class="ctl">
+    <div><h4>DESKTOP</h4>
+      <div><kbd>W A S D</kbd> / arrows — steer</div>
+      <div><kbd>Space</kbd> / left mouse — fire</div>
+      <div><kbd>Shift</kbd> — boost</div>
+      <div><kbd>C</kbd> / <kbd>E</kbd> / <kbd>Ctrl</kbd> — dive / surface (toggle)</div>
+    </div>
+    <div><h4>TOUCH</h4>
+      <div>Left thumb — virtual stick (drag anywhere)</div>
+      <div>Right — FIRE (hold), BOOST (hold), DIVE (tap toggle)</div>
+      <div>TILT — gyro steering on/off</div>
+      <div>Air underwater ≈ 60 s / воздух ≈ 60 с</div>
+    </div>
+  </div>
+  <div class="cta" id="startBtn">TAP TO START · НАЖМИТЕ</div>
+</div>
+
+<div class="screen" id="result">
+  <div class="title" id="rTitle" style="font-size:clamp(26px,5vw,48px)">DELIVERED</div>
+  <div class="sub" id="rSub">ДОСТАВЛЕНО</div>
+  <table>
+    <tr><td>TIME / ВРЕМЯ</td><td id="rTime"></td></tr>
+    <tr><td>CARGO / ГРУЗ</td><td id="rCargo"></td></tr>
+    <tr><td>HEALTH / ЗДОРОВЬЕ</td><td id="rHealth"></td></tr>
+    <tr><td>TARGETS / ЦЕЛИ</td><td id="rTargets"></td></tr>
+    <tr><td>MASTS BROKEN / МАЧТЫ</td><td id="rMasts"></td></tr>
+    <tr><td>SCORE / ОЧКИ</td><td id="rScore"></td></tr>
+  </table>
+  <div class="cta" id="retry">RETRY · ЗАНОВО</div>
+</div>
+
+<div class="screen" id="rotate"><div class="phone"></div><div class="sub">ROTATE TO LANDSCAPE<br>ПОВЕРНИТЕ ТЕЛЕФОН</div></div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

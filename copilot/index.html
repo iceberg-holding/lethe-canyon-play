@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#221a1a">
+  <title>LETHE (ЛЕТА) — Delivery</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">
+    {"imports":{"three":"./lib/three.module.min.js","three/addons/":"./lib/addons/"}}
+  </script>
+</head>
+<body>
+  <main id="game" aria-label="Lethe: Delivery">
+    <canvas id="view"></canvas>
+    <div id="vignette"></div>
+    <div id="radiation"></div>
+    <div id="portrait">ROTATE TO LANDSCAPE<br><span>ПОВЕРНИТЕ ЭКРАН</span></div>
+    <section id="hud" aria-live="polite">
+      <header class="topline">
+        <div class="brand">LETHE <small>· DELIVERY / ДОСТАВКА</small></div>
+        <div class="route"><span>SETTLEMENT A</span><i></i><b>SETTLEMENT B</b></div>
+        <div id="clock">00:00</div>
+      </header>
+      <div class="left-readouts">
+        <div class="readout"><div class="label">DISTANCE TO B <span>ДО Б</span></div><div class="value"><strong id="distance">4.8</strong><small>KM</small></div></div>
+        <div class="readout"><div class="label">SPEED <span>СКОРОСТЬ</span></div><div class="value"><strong id="speed">0</strong><small>KM/H</small></div></div>
+      </div>
+      <div class="right-readouts">
+        <div class="meter-block"><div class="meter-label">CARGO / ГРУЗ <strong id="cargo-text">100%</strong></div><div class="meter"><i id="cargo-bar"></i></div></div>
+        <div class="meter-block health"><div class="meter-label">PILOT / ПИЛОТ <strong id="health-text">100%</strong></div><div class="meter"><i id="health-bar"></i></div></div>
+        <div class="meter-block radiation-meter"><div class="meter-label">RADIATION <strong id="radiation-text">SAFE</strong></div><div class="meter"><i id="radiation-bar"></i></div></div>
+        <div class="meter-block air"><div class="meter-label">DIVE AIR / ВОЗДУХ <strong id="air-text">60s</strong></div><div class="meter"><i id="air-bar"></i></div></div>
+        <div class="score">SCORE <span id="score">000000</span></div>
+      </div>
+      <div id="zone" class="zone">SHIELDED</div>
+      <div id="alert" class="alert"></div>
+      <div id="reticle"><i></i><b></b></div>
+      <div id="underwater-label">HYDROJET · SUBMERGED</div>
+    </section>
+    <section id="controls" aria-label="Flight controls">
+      <div id="stick" class="stick" aria-label="Steer">
+        <div class="stick-ring"></div><div id="stick-knob" class="stick-knob"></div>
+        <small>STEER</small>
+      </div>
+      <button id="tilt" class="tilt" type="button">TILT: OFF</button>
+      <div class="action-buttons">
+        <button id="dive" class="action dive" type="button"><span>DIVE</span><small>Нырок</small></button>
+        <button id="fire" class="action fire" type="button"><span>FIRE</span><small>Огонь</small></button>
+        <button id="boost" class="action boost" type="button"><span>BOOST</span><small>Тяга</small></button>
+      </div>
+    </section>
+    <section id="start" class="overlay">
+      <div class="card intro">
+        <div class="eyebrow">LETHE · SEASON 01 / EPISODE 01</div>
+        <h1>DELIVERY<span>ДОСТАВКА</span></h1>
+        <p class="story">A water run through the valleys of Mars. The river below is poison. The cargo is not.</p>
+        <div class="missionline"><b>MISSION</b> Carry the water to Well · 4.8 km <span>Колодец</span></div>
+        <div class="brief-grid">
+          <div><b>FLY</b><span>WASD / ARROWS · auto-forward</span></div>
+          <div><b>DIVE</b><span>C / E toggles · evade while submerged</span></div>
+          <div><b>FIRE</b><span>SPACE / LEFT MOUSE · spare the masts</span></div>
+          <div><b>BOOST</b><span>SHIFT · short speed burst</span></div>
+        </div>
+        <p class="mobile-hint">Touch: left stick to steer · tap DIVE to submerge · hold FIRE or BOOST.<br>На телефоне поверните экран горизонтально.</p>
+        <button id="start-button" class="primary" type="button">BEGIN FLIGHT <span>НАЧАТЬ</span></button>
+        <div class="subnote">Audio and fullscreen are enabled when available. Tap / press any key to begin.</div>
+      </div>
+    </section>
+    <section id="result" class="overlay hidden">
+      <div class="card outcome">
+        <div id="result-kicker" class="eyebrow">FLIGHT REPORT · LETHE NETWORK</div>
+        <h2 id="result-title">DELIVERY COMPLETE</h2>
+        <p id="result-copy"></p>
+        <div class="result-grid">
+          <div><span>TIME / ВРЕМЯ</span><b id="result-time">00:00</b></div>
+          <div><span>CARGO / ГРУЗ</span><b id="result-cargo">100%</b></div>
+          <div><span>SCORE / ОЧКИ</span><b id="result-score">000000</b></div>
+          <div><span>HEALTH / ЗДОРОВЬЕ</span><b id="result-health">100%</b></div>
+        </div>
+        <button id="retry" class="primary" type="button">FLY AGAIN <span>ПОВТОРИТЬ</span></button>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="./src/game.js"></script>
+</body>
+</html>
