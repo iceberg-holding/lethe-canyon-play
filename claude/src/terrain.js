@@ -789,7 +789,7 @@ export function buildShafts(scene, sun2) {
       const side = R() < 0.5 ? -1 : 1;
       const lat = side * (wallLat(ss, H - 10, side) - 6 - R() * 12);
       const top = toWorld(ss, lat, H - 4, new THREE.Vector3());
-      const len = (H + 10) / -dir.y, w = 4 + R() * 9;
+      const len = Math.min(300, (H + 10) / -dir.y), w = 4 + R() * 9;   // (round 4: the mirror is lower -> cap the slant length)
       for (const [sd, e] of [[-1, 0], [1, 0], [-1, 1], [1, 1]]) {
         aA.push(top.x, top.y, top.z); aD.push(dir.x, dir.y, dir.z); aP.push(len, w, sd, e);
       }
@@ -942,16 +942,27 @@ void main(){
   // sun: glow + bright disc (HDR for bloom)
   col += vec3(1.0, 0.6, 0.35) * pow(s1, 5.0) * 0.18 + vec3(1.0, 0.82, 0.55) * pow(s1, 70.0) * 0.45;
   col = mix(col, vec3(2.6, 2.3, 1.85), smoothstep(0.99935, 0.99955, s1));
-  // orbital mirror: small cold-white disc, halo and a dimmed, flickering ring
-  float s2 = max(dot(d, uSun2), 0.0);
-  float ang = acos(clamp(s2, -1.0, 1.0));
-  float flick = 0.82 + 0.1 * sin(uTime * 7.3) * sin(uTime * 2.1 + 1.0) + 0.08 * step(0.97, h21(vec2(floor(uTime * 12.0), 3.0)));
-  col += vec3(0.75, 0.86, 1.0) * (exp(-ang * 26.0) * 0.32 + exp(-ang * 90.0) * 0.5) * flick;
-  float ringA = atan(dot(d, normalize(cross(uSun2, vec3(0.0, 1.0, 0.0)))), d.y - uSun2.y);
-  float rq = (ang - 0.034) / 0.0035;
-  float ring = exp(-rq * rq) * (0.55 + 0.45 * sin(ringA * 3.0 + uTime * 0.3));
-  col += vec3(0.7, 0.85, 1.0) * ring * 0.35 * flick;
-  col = mix(col, vec3(1.9, 2.05, 2.25) * flick, smoothstep(0.0115, 0.0085, ang));
+  // orbital mirror (second sun, round 4): cooler/whiter and distinct from the real sun — crisp disc, sharp ring,
+  // soft halo, faint cross / lens streaks, and a slow dimming pulse with rare stutters (LETHE is dimming it)
+  float s2 = dot(d, uSun2);
+  if (s2 > 0.0) {
+    float ang = acos(clamp(s2, -1.0, 1.0));
+    vec3 rgt = normalize(cross(uSun2, vec3(0.0, 1.0, 0.0)));
+    vec3 upv = cross(rgt, uSun2);
+    vec2 q = vec2(dot(d, rgt), dot(d, upv));
+    float pulse = 0.8 + 0.14 * sin(uTime * 0.5) + 0.06 * sin(uTime * 1.63 + 0.6);
+    float flick = pulse * (1.0 - 0.4 * step(0.986, h21(vec2(floor(uTime * 14.0), 5.0))));
+    vec3 cool = vec3(0.76, 0.9, 1.0);
+    col += cool * (exp(-ang * 13.0) * 0.2 + exp(-ang * 48.0) * 0.4) * flick;
+    float rq = (ang - 0.06) / 0.0026;
+    col += cool * exp(-rq * rq) * 0.85 * flick;
+    float rq2 = (ang - 0.098) / 0.005;
+    col += cool * exp(-rq2 * rq2) * 0.16 * flick;
+    float sx = exp(-abs(q.y) * 380.0) * exp(-abs(q.x) * 8.0);
+    float sy = exp(-abs(q.x) * 380.0) * exp(-abs(q.y) * 20.0);
+    col += cool * (sx * 0.85 + sy * 0.45) * flick;
+    col = mix(col, vec3(2.4, 2.6, 2.85) * (0.82 + 0.18 * flick), smoothstep(0.0165, 0.0142, ang));
+  }
   // distant mesas: three hazy layers with parallax (far -> near)
   float L3 = skyline(dxz, 6000.0, 1.0 / 900.0, 0.012, 0.05, 1.0);
   if (h < L3) col = mix(vec3(0.74, 0.46, 0.36), uHor, 0.62);

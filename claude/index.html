@@ -142,6 +142,25 @@
   #hitx.on{animation:hitx .32s ease-out}
   #hitx.kill::before,#hitx.kill::after{background:var(--amber)}
   @keyframes hitx{0%{opacity:1;scale:1.5}35%{opacity:1;scale:1}100%{opacity:0;scale:.9}}
+  /* ---------- round 4: naval targets, armour ricochet tag, off-screen threat chevrons ---------- */
+  #reticle.uw{border-color:rgba(120,255,235,.7)}
+  #reticle.uw::before,#reticle.uw::after{background:rgba(140,255,240,.9)}
+  .tgt.uwk::before,.tgt.uwk::after{border-color:#8ff6e6}
+  .tgt.uwk span{color:#8ff6e6}
+  .tgt.boat{opacity:.6}
+  .tgt.weak{opacity:1;animation:weak .7s ease-in-out infinite alternate}
+  .tgt.weak::before,.tgt.weak::after{border-width:2px;border-color:#ffb36b;filter:drop-shadow(0 0 4px rgba(255,170,80,.9))}
+  .tgt.weak span{color:#ffd2a0;font-weight:600}
+  @keyframes weak{from{opacity:.65}to{opacity:1}}
+  .armor{position:absolute;left:0;top:0;transform:translate(-50%,-50%);font-size:10px;font-weight:600;letter-spacing:.2em;color:#e8f0ff;white-space:nowrap;
+    text-shadow:0 0 6px rgba(140,180,255,.9),0 1px 2px #000;opacity:0;pointer-events:none}
+  .armor.on{animation:armor .8s ease-out}
+  @keyframes armor{0%{opacity:1;margin-top:0}60%{opacity:1}100%{opacity:0;margin-top:-26px}}
+  #threats{position:absolute;inset:0;pointer-events:none}
+  .thr{position:absolute;left:0;top:0;width:36px;height:36px;margin:-18px 0 0 -18px;display:none;filter:drop-shadow(0 0 5px rgba(255,40,20,.95))}
+  .thr::before{content:"";position:absolute;inset:0;background:#ff4a30;clip-path:polygon(100% 50%,20% 4%,42% 50%,20% 96%);animation:thr .38s ease-in-out infinite alternate}
+  .thr::after{content:"";position:absolute;inset:0;background:rgba(255,120,90,.55);clip-path:polygon(62% 50%,0 14%,16% 50%,0 86%);animation:thr .38s ease-in-out .19s infinite alternate}
+  @keyframes thr{from{opacity:.45;transform:translateX(-3px)}to{opacity:1;transform:translateX(2px)}}
   #keys{position:absolute;left:calc(16px + var(--sl));bottom:calc(14px + var(--sb));font-size:9px;letter-spacing:.12em;line-height:1.85;color:var(--dim);
     padding:7px 11px 7px 10px;border-left:1px solid var(--line);background:linear-gradient(90deg,rgba(20,10,8,.42),rgba(20,10,8,0));opacity:0;transition:opacity 1.2s ease}
   #keys.on{opacity:1;transition:opacity .3s}
@@ -237,6 +256,7 @@
 
 <div id="hud">
   <div id="tgts"></div>
+  <div id="threats"></div>
   <div id="brackets"></div>
   <div id="reticle"></div>
   <div id="hitx"></div>
@@ -294,7 +314,7 @@
       </div>
       <div class="instr">
         <span class="tonly"><b>Left thumb</b> stick · <b>FIRE</b> / <b>BOOST</b> hold · <b>ROCKET</b> / <b>DIVE</b> tap · <b>TILT</b> gyro · ⚙ engine<br></span>
-        <span class="tg">Amber brackets</span> = targets (drones, beacons, rim turrets). <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water shields you.
+        <span class="tg">Amber brackets</span> = targets (drones, beacons, rim turrets). <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water hides you — mines and hunters wait below.
       </div>
       <div class="eng" id="engSel"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div></div>
       <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i></div>
@@ -313,6 +333,9 @@
     <div>HEALTH / ЗДОРОВЬЕ<b id="rHealth"></b></div>
     <div>TARGETS / ЦЕЛИ<b id="rTargets"></b></div>
     <div>MASTS / МАЧТЫ<b id="rMasts"></b></div>
+    <div>MINES / МИНЫ<b id="rMines"></b></div>
+    <div>HUNTERS / ОХОТНИКИ<b id="rHunters"></b></div>
+    <div>BOATS / КАТЕРА<b id="rBoats"></b></div>
     <div>LETHE HITS / ПОПАДАНИЯ<b id="rHits"></b></div>
     <div class="big">SCORE / ОЧКИ<b id="rScore"></b></div>
   </div>

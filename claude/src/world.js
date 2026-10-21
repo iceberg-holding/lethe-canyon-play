@@ -257,10 +257,72 @@ DRESS.scorched2 = { s: 6380, side: -1 };
 // pipeline on stilts along the left bank
 DRESS.pipe = { s0: 150, s1: PAD_B - 120, side: -1, y: 7.5 };
 
+// ---------------------------------------------------------------- naval layer (round 4)
+// riverbed height under (s, lat): matches the terrain cross-section profile in terrain.js
+export function bedY(s, lat) {
+  const wr = riverHalf(s), a = Math.abs(lat) / wr;
+  if (a < 0.45) return -10.5;
+  if (a < 0.8) return lerp(-10.5, -7, (a - 0.45) / 0.35);
+  if (a < 0.95) return lerp(-7, -2.5, (a - 0.8) / 0.15);
+  return lerp(-2.5, 0.4, clamp((a - 0.95) / 0.05, 0, 1));
+}
+// lateral limit of the ship while submerged (see updateFlight)
+export const underLim = (s) => riverHalf(s) * 0.8 - 3;
+
+// Tethered naval mines: clusters in the dive sections (the three low arches) and open stretches under turret cover.
+// [s0, s1, count]; a staggered slalom across the river, mixed depths (≈ 1/3 just under the surface: they threaten
+// skimming too).
+export const MINES = [];
+const MINE_FIELDS = [[1375, 1525, 6], [2140, 2290, 5], [3385, 3545, 7], [4360, 4500, 5], [5545, 5700, 8], [7140, 7290, 5]];
+const R2 = rng(4404);
+const r2 = (a, b) => a + (b - a) * R2();
+for (const [s0, s1, n] of MINE_FIELDS) {
+  const len = s1 - s0;
+  for (let i = 0; i < n; i++) {
+    const s = s0 + (i + 0.5) * (len / n) + r2(-6, 6);
+    const lim = underLim(s) - 1.5;
+    let lat = (((i * 2) % 3) - 1) * lim * 0.62 + r2(-3, 3);
+    lat = clamp(lat, -lim, lim);
+    for (let k = 0; k < 6 && nearRock(s, lat, 5); k++) lat = r2(-lim, lim);
+    const shallow = R2() < 0.36;
+    const y = shallow ? r2(-1.6, -1.05) : r2(-6.2, -2.0);
+    MINES.push({ s, lat, y, phase: R2() * 6.28, alive: true, fuse: 0 });
+  }
+}
+MINES.sort((a, b) => a.s - b.s);
+
+// LETHE hunter-subs: small torpedo drones that live underwater in three deep sections.
+export const HUNTERS = [];
+for (const [s0, n] of [[3470, 2], [5590, 3], [6960, 2]]) {
+  for (let i = 0; i < n; i++) {
+    const s = s0 + 40 + i * 70 + r2(-10, 10);
+    HUNTERS.push({ s, home: s, lat: r2(-0.4, 0.4) * underLim(s), y: r2(-6, -3.5), phase: R2() * 6.28, alive: true });
+  }
+}
+
+// Boats on the surface: smuggler rivals (rusty, orange lights) and Council patrol boats (grey-white, blue lights).
+// They cruise slowly back and forth around a home position; lanes avoid rock columns.
+export const BOATS = [];
+for (const [s, type, dir] of [[1020, 'smuggler', 1], [3200, 'patrol', -1], [4700, 'smuggler', -1], [6280, 'patrol', 1]]) {
+  const wr = riverHalf(s);
+  let lat = 0, best = 1e9;
+  for (let c = -0.55; c <= 0.551; c += 0.05) {
+    const l = c * wr;
+    let cost = Math.abs(c) * 2;
+    for (const r of ROCKS) if (Math.abs(r.s - s) < 200 && Math.abs(r.lat - l) < r.r + 7) cost += 10;
+    if (cost < best) { best = cost; lat = l; }
+  }
+  BOATS.push({ s, home: s, lat, lat0: lat, type, dir, dir0: dir, speed: type === 'patrol' ? 6 : 4.5, alive: true });
+}
+
 export function resetLevel() {
   for (const z of ZONES) { z.shielded = true; z.collapse = 0; }
   for (const b of BEACONS) b.alive = true;
-  for (const d of DRONES) d.alive = true;
+  for (const d of DRONES) d.alive = !d.debug;
   for (const m of MASTS) { m.alive = true; m.broken = 0; }
   for (const t of TURRETS) { t.alive = true; t.cd = 2 + Math.random() * 4; }
+  // (debug spawn slots stay dead)
+  for (const m of MINES) { m.alive = !m.debug; m.fuse = 0; }
+  for (const h of HUNTERS) { h.alive = !h.debug; h.s = h.home; }
+  for (const b of BOATS) { b.alive = !b.debug; b.s = b.home; b.lat = b.lat0; b.dir = b.dir0; }
 }

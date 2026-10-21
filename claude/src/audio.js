@@ -360,5 +360,21 @@ export class Audio {
   }
   dive() { this.tone('sine', 260, 120, 0.12, 0.3); this.noiseHit('lowpass', 1200, 1, 0.15, 0.25); }
   score() { this.tone('sine', 880, 1320, 0.06, 0.12, 0.05, { ui: true }); this.tone('sine', 1320, 1760, 0.04, 0.12, 0.12, { ui: true }); }
+  // ---------------------------------------------------------------- round 4: naval layer
+  // armour ricochet: bright metallic ting + short whine
+  ricochet(pan = 0) {
+    if (!this.ctx) return;
+    const v = 1 + (Math.random() - 0.5) * 0.12;
+    this.tone('triangle', 3300 * v, 2500 * v, 0.07, 0.14, 0, { pan, attack: 0.0008, verb: 0.15 });
+    this.tone('sine', 5200 * v, 4700 * v, 0.035, 0.09, 0.004, { pan, attack: 0.0008 });
+    this.tone('sine', 1900 * v, 900 * v, 0.03, 0.22, 0.03, { pan });
+    this.noiseHit('highpass', 4000, 1, 0.12, 0.02, 0, { pan, attack: 0.0006 });
+  }
+  // hunter-sub acquiring: sonar ping with a long tail
+  sonar(pan = 0) { if (this.ctx) { this.tone('sine', 1450, 1440, 0.09, 0.9, 0, { pan, attack: 0.004, verb: 0.6 }); this.tone('sine', 1450, 1440, 0.04, 0.6, 0.45, { pan, verb: 0.6 }); } }
+  hunterCharge(pan = 0) { if (this.ctx) this.tone('sine', 420, 1500, 0.05, 0.5, 0, { pan, attack: 0.4 }); }
+  hunterShot(pan = 0) { if (this.ctx) { this.tone('sine', 900, 160, 0.12, 0.25, 0, { pan, attack: 0.002 }); this.noiseHit('lowpass', 900, 1, 0.18, 0.2, 200, { pan }); } }
+  // patrol boat about to fire: two short horn blips
+  boatAlarm(pan = 0) { if (this.ctx) for (let i = 0; i < 2; i++) this.tone('square', 540, 520, 0.035, 0.12, i * 0.16, { pan, attack: 0.004 }); }
   empty() { this.tone('square', 220, 200, 0.04, 0.06, 0, { ui: true }); }
 }
