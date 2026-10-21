@@ -6,21 +6,27 @@ export const input = {
   stick: { x: 0, y: 0, id: null, ox: 0, oy: 0 },
   tilt: { on: false, x: 0, y: 0, b0: null, g0: null },
   keys: new Set(), mouseFire: false, touchFire: false, touchBoost: false,
-  divePressed: false,
+  divePressed: false, rocketPressed: false,
   consumeDive() { const d = this.divePressed; this.divePressed = false; return d; },
+  consumeRocket() { const d = this.rocketPressed; this.rocketPressed = false; return d; },
 };
 
 const DIVE_KEYS = ['KeyC', 'KeyE', 'ControlLeft', 'ControlRight'];
 export function setupInput(canvas) {
   addEventListener('keydown', (e) => {
     if (DIVE_KEYS.includes(e.code) && !e.repeat) input.divePressed = true;
+    if (e.code === 'KeyR' && !e.repeat) input.rocketPressed = true;
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ControlLeft', 'ControlRight'].includes(e.code)) e.preventDefault();
     input.keys.add(e.code);
   });
   addEventListener('keyup', (e) => input.keys.delete(e.code));
   addEventListener('blur', () => { input.keys.clear(); input.mouseFire = false; });
-  canvas.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 0) input.mouseFire = true; });
-  addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse') input.mouseFire = false; });
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    if (e.button === 0) input.mouseFire = true;
+    else if (e.button === 2) input.rocketPressed = true;
+  });
+  addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse' && e.button === 0) input.mouseFire = false; });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // floating virtual stick on the left side
@@ -61,6 +67,8 @@ export function setupInput(canvas) {
   };
   hold('btnFire', 'touchFire');
   hold('btnBoost', 'touchBoost');
+  const rk = document.getElementById('btnRocket');
+  rk.addEventListener('pointerdown', (e) => { input.rocketPressed = true; rk.classList.add('on'); setTimeout(() => rk.classList.remove('on'), 140); e.preventDefault(); });
   const dive = document.getElementById('btnDive');
   dive.addEventListener('pointerdown', (e) => { input.divePressed = true; e.preventDefault(); });
 

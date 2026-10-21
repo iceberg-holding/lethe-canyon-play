@@ -46,3 +46,15 @@ export function fbm2(x, y, oct = 3) {
   }
   return s / n;
 }
+
+// replace zero-length / NaN normals (degenerate triangles) so lighting never produces NaN (which bloom would smear)
+export function sanitizeNormals(g) {
+  const n = g.attributes.normal;
+  if (!n) return g;
+  for (let i = 0; i < n.count; i++) {
+    const x = n.getX(i), y = n.getY(i), z = n.getZ(i);
+    const l = Math.hypot(x, y, z);
+    if (!(l > 1e-6)) n.setXYZ(i, 0, 1, 0);
+  }
+  return g;
+}

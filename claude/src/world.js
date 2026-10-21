@@ -4,9 +4,9 @@
 import { clamp, lerp, smoothstep, noise1, noise2, fbm2, rng } from './util.js';
 
 export const S0 = -400;          // terrain starts here
-export const S_END = 9700;       // terrain ends here
+export const S_END = 8750;       // terrain ends here
 export const PAD_A = 60;         // settlement A landing pad
-export const PAD_B = 9000;       // settlement B landing pad
+export const PAD_B = 8050;       // settlement B landing pad
 export const PAD_TOP = 3.2;      // pad deck height
 export const ROUTE = PAD_B - PAD_A;
 
@@ -21,7 +21,9 @@ function thetaAt(s) {
 export function basinF(s) {
   return Math.max(1 - smoothstep(200, 520, s), smoothstep(PAD_B - 480, PAD_B - 180, s));
 }
-export const NARROWS = [[1650, 200], [3350, 240], [5250, 180], [7150, 220]];
+export const NARROWS = [[1250, 200], [2620, 240], [3900, 180], [5250, 220], [6620, 200]];
+// dry tributaries: side notches cut into one wall (environmental storytelling)
+export const TRIBS = [{ s: 1850, side: 1, hw: 26, d: 34 }, { s: 4560, side: -1, hw: 22, d: 28 }, { s: 7080, side: 1, hw: 24, d: 30 }];
 function narrowF(s) {
   let m = 0;
   for (const [c, l] of NARROWS) m = Math.max(m, 1 - smoothstep(l * 0.5, l * 0.5 + 120, Math.abs(s - c)));
@@ -102,7 +104,13 @@ export function wallLat(s, y, side) {
   const amp = 1 - 0.5 * NZ[i];
   const n = fbm2(s * 0.013 + side * 91.7, yy * 0.04, 2) * 6 * amp;
   const flute = 1.6 * amp * Math.sin(s * 0.21 + side * 2 + 2.5 * noise2(s * 0.01, yy * 0.03 + side * 5));
-  return WB[i] + (yy - 3) * SL[i] + terr + n + flute;
+  let tr = 0;
+  for (const t of TRIBS) {
+    if (t.side !== side) continue;
+    const ds = Math.abs(s - t.s);
+    if (ds < t.hw + 30) tr += t.d * (1 - smoothstep(t.hw * 0.4, t.hw + 30, ds)) * (1 - smoothstep(30, 85, yy));
+  }
+  return WB[i] + (yy - 3) * SL[i] + terr + n + flute + tr;
 }
 
 // ground height under a point (above the riverbed; river surface is y=0)
@@ -118,9 +126,10 @@ const R = rng(20290);
 const rr = (a, b) => a + (b - a) * R();
 
 export const ARCHES = [];
-const archS = [1150, 2050, 2720, 3900, 4600, 5800, 6480, 7620, 8250];
-archS.forEach((s, i) => {
-  const low = i === 1 || i === 4 || i === 7;
+// [s, low]: low arches can only be passed by skimming or diving under them
+const archS = [[800, 0], [1450, 1], [1960, 0], [2330, 0], [3050, 0], [3460, 1], [4250, 0], [4860, 0], [5620, 1], [6120, 0], [6930, 0], [7380, 0]];
+archS.forEach(([s, lw]) => {
+  const low = !!lw;
   const yb = low ? rr(8.5, 10) : rr(24, 38);
   const th = low ? rr(10, 14) : rr(7, 11);
   const w = Math.max(wallLat(s, yb, -1), wallLat(s, yb, 1)) + 6;
@@ -151,11 +160,20 @@ export const ROCKS = [];
     ROCKS.push({ s, lat, r, h, boulder, seed: R() * 100 });
   }
 }
+// a crashed courier half in the water (collides like a low boulder)
+export const WRECK = { s: 2960, side: -1 };
+{
+  const wr = riverHalf(WRECK.s);
+  WRECK.lat = WRECK.side * (wr - 5);
+  for (let i = ROCKS.length - 1; i >= 0; i--) if (Math.abs(ROCKS[i].s - WRECK.s) < 40) ROCKS.splice(i, 1);
+  ROCKS.push({ s: WRECK.s, lat: WRECK.lat, r: 4.5, h: 4.5, boulder: true, wreck: true, seed: 0 });
+  ROCKS.sort((a, b) => a.s - b.s);
+}
 
 // Shield zones: each one has a force-field emitter mast.
 export const ZONES = [];
 {
-  const z0 = 520, z1 = PAD_B - 460, n = 14, len = (z1 - z0) / n;
+  const z0 = 520, z1 = PAD_B - 460, n = 13, len = (z1 - z0) / n;
   for (let i = 0; i < n; i++) ZONES.push({ s0: z0 + i * len, s1: z0 + (i + 1) * len, shielded: true, mast: null, collapse: 0 });
 }
 export function zoneAt(s) {
@@ -209,9 +227,40 @@ ZONES.forEach((z, zi) => {
 BEACONS.sort((a, b) => a.s - b.s);
 DRONES.sort((a, b) => a.s - b.s);
 
+// LETHE rim turrets: upper-ledge emplacements near the drone sections
+export const TURRETS = [];
+ZONES.forEach((z, zi) => {
+  const len = z.s1 - z.s0, nt = zi % 2 ? 2 : 1;
+  for (let k = 0; k < nt; k++) {
+    const s = z.s0 + len * (nt === 1 ? rr(0.45, 0.7) : (k ? rr(0.65, 0.85) : rr(0.2, 0.4)));
+    const side = R() < 0.5 ? -1 : 1;
+    const y = clamp(rimH(s) - rr(55, 75), 52, 80);
+    const lat = side * (wallLat(s, y, side) - 1.2);
+    TURRETS.push({ s, y, lat, side, alive: true, cd: rr(2, 6), zone: z });
+  }
+});
+TURRETS.sort((a, b) => a.s - b.s);
+
+// set dressing positions (static, merged into chunk meshes)
+export const DRESS = { cables: [], ruins: [], signs: [], markers: [] };
+for (let s = 700; s < PAD_B - 400; s += rr(520, 820)) DRESS.cables.push({ s, y: rr(84, 110), sag: rr(8, 16), s2: s + rr(-30, 30) });
+for (let s = 420; s < PAD_B - 400; s += rr(320, 560)) {
+  if (narrowAt(s) > 0.2) continue;
+  DRESS.ruins.push({ s, side: R() < 0.5 ? -1 : 1, kind: R() < 0.5 ? 'tower' : 'condenser', h: rr(16, 34), seed: R() });
+}
+ZONES.forEach((z) => DRESS.signs.push({ s: z.s0 + 25, side: z.mast ? -z.mast.side : 1 }));
+for (let s = 300; s < PAD_B - 300; s += rr(140, 260)) DRESS.markers.push({ s, side: R() < 0.5 ? -1 : 1 });
+// story props: a scorched turret wreck and a mast broken on a previous run
+DRESS.scorched = { s: 2250, side: 1 };
+DRESS.oldMast = { s: 3520, side: -1 };
+DRESS.scorched2 = { s: 6380, side: -1 };
+// pipeline on stilts along the left bank
+DRESS.pipe = { s0: 150, s1: PAD_B - 120, side: -1, y: 7.5 };
+
 export function resetLevel() {
   for (const z of ZONES) { z.shielded = true; z.collapse = 0; }
   for (const b of BEACONS) b.alive = true;
   for (const d of DRONES) d.alive = true;
   for (const m of MASTS) { m.alive = true; m.broken = 0; }
+  for (const t of TURRETS) { t.alive = true; t.cd = 2 + Math.random() * 4; }
 }
