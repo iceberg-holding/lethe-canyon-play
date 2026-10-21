@@ -4,29 +4,30 @@ import * as THREE from 'three';
 const pointVS = /* glsl */`
 attribute vec4 aCol; attribute float aSize;
 uniform float uScale; uniform float uFogD; uniform float uMax;
-varying vec4 vCol; varying float vFog;
+varying vec4 vCol; varying float vFog; varying float vNear;
 void main(){
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
   gl_PointSize = min(aSize * uScale / max(-mv.z, 0.5), uMax);
   float d = -mv.z * uFogD; vFog = exp(-d * d);
+  vNear = smoothstep(2.5, 10.0, -mv.z);   // no giant blobs right at the lens
   vCol = aCol;
 }`;
 const glowFS = /* glsl */`
-varying vec4 vCol; varying float vFog;
+varying vec4 vCol; varying float vFog; varying float vNear;
 void main(){
   vec2 p = gl_PointCoord * 2.0 - 1.0; float r = dot(p, p);
   if (r > 1.0) discard;
   float a = exp(-r * 5.0) * 0.8 + exp(-r * 30.0);
-  gl_FragColor = vec4(vCol.rgb * a * vCol.a * vFog, 1.0);
+  gl_FragColor = vec4(vCol.rgb * a * vCol.a * vFog * vNear, 1.0);
 }`;
 const softFS = /* glsl */`
 uniform vec3 uFogCol;
-varying vec4 vCol; varying float vFog;
+varying vec4 vCol; varying float vFog; varying float vNear;
 void main(){
   vec2 p = gl_PointCoord * 2.0 - 1.0; float r = dot(p, p);
   if (r > 1.0) discard;
-  float a = (1.0 - r) * (1.0 - r) * vCol.a;
+  float a = (1.0 - r) * (1.0 - r) * vCol.a * vNear;
   gl_FragColor = vec4(mix(uFogCol, vCol.rgb, vFog), a);
 }`;
 

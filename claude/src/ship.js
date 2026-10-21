@@ -155,14 +155,22 @@ export class Ship {
     this.body = body;
     this.group.add(body);
     const tx = shipTextures(512);
-    const std = (o) => new THREE.MeshStandardMaterial({ envMap, envMapIntensity: 1.0, ...o });
-    const metal = std({ color: 0x9a9da0, metalness: 0.7, roughness: 0.42, map: tx.map, roughnessMap: tx.rough });
+    // hull materials soft-knee their output below the bloom threshold so the ship never melts into a white blob
+    // (facing the sun, with spec + env reflections); only the engine discs / lamps are allowed to bloom
+    const knee = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', `
+        { float m = max(gl_FragColor.r, max(gl_FragColor.g, gl_FragColor.b));
+          if (m > 0.72) gl_FragColor.rgb *= (0.72 + 0.16 * (1.0 - exp(-(m - 0.72) * 3.0))) / m; }
+        #include <dithering_fragment>`);
+    };
+    const std = (o) => { const m = new THREE.MeshStandardMaterial({ envMap, envMapIntensity: 0.7, ...o }); m.onBeforeCompile = knee; return m; };
+    const metal = std({ color: 0x8a8d91, metalness: 0.6, roughness: 0.52, map: tx.map, roughnessMap: tx.rough });
     const gun = std({ color: 0x3a3c40, metalness: 0.75, roughness: 0.38, map: tx.map });
     const dark = std({ color: 0x2a2c30, metalness: 0.5, roughness: 0.55 });
     const pale = std({ color: 0xc9cbcc, metalness: 0.35, roughness: 0.45, map: tx.map });
     const ochre = std({ color: 0xc08a30, metalness: 0.25, roughness: 0.55 });
-    const glass = std({ color: 0x1b2328, metalness: 0.2, roughness: 0.06, envMapIntensity: 2.2, emissive: 0x3a1c06, emissiveIntensity: 0.6 });
-    const lamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.2, 0.35) });
+    const glass = std({ color: 0x1b2328, metalness: 0.2, roughness: 0.06, envMapIntensity: 1.4, emissive: 0x3a1c06, emissiveIntensity: 0.4 });
+    const lamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 0.8, 0.25) });
     this.mats = { metal, gun, dark, pale, ochre, glass, lamp };
     this.meshes = [];
 
@@ -355,8 +363,8 @@ export class Ship {
     this.glowMat.color.copy(this.glowColor).multiplyScalar(flick * (1.15 + boost * 0.5) * (0.4 + 0.6 * power));
     this.plumeMat.uniforms.uTime.value = time;
     this.plumeMat.uniforms.uCol.value.copy(this.glowColor).multiplyScalar(1.2);
-    this.plumeMat.uniforms.uPow.value = power * (0.35 + boost * 0.55) * (1 - e * 0.6);
+    this.plumeMat.uniforms.uPow.value = power * (0.22 + boost * 0.4) * (1 - e * 0.6);
     for (const p of this.plumes) { p.scale.set(1, 0.7 + boost * 0.7 + 0.08 * Math.sin(time * 47), 1); p.position.z = 7.4 + 3 * p.scale.y; }
-    this.mats.lamp.color.setRGB(2.4, 1.2, 0.35).multiplyScalar(0.75 + 0.25 * Math.sin(time * 3));
+    this.mats.lamp.color.setRGB(1.5, 0.8, 0.25).multiplyScalar(0.8 + 0.2 * Math.sin(time * 3));
   }
 }

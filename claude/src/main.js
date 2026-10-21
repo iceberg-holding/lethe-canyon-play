@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, lerp, damp, smoothstep } from './util.js';
 import {
-  PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY,
+  PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
   ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, resetLevel,
 } from './world.js';
 import {
@@ -291,7 +291,7 @@ const shipPos = new THREE.Vector3(), shipFwd = new THREE.Vector3(), shipVel = ne
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), camOff = new THREE.Vector3();
 let camInit = false, camUnder = false, camLatAdj = 0;
 
-function showMsg(en, ru, dur = 2.2, color = '#f6efe6') {
+function showMsg(en, ru, dur = 2, color = '#f6efe6') {
   hud.msg.innerHTML = `${en}<small>${ru}</small>`;
   hud.msg.style.color = color;
   hud.msg.style.opacity = 1;
@@ -506,7 +506,7 @@ function updateFlight(dt) {
     const t = G.phaseT;
     G.y = PAD_TOP + 1.7 + smoothstep(0.3, 2.6, t) * 9;
     G.speed = smoothstep(0.9, 2.8, t) * 45;
-    if (t > 2.8) { G.phase = 'flight'; showMsg('FLY TO SETTLEMENT B', 'ЛЕТИТЕ В ПОСЕЛЕНИЕ Б', 2.4); }
+    if (t > 2.8) { G.phase = 'flight'; showMsg('FLY TO SETTLEMENT B', 'ЛЕТИТЕ В ПОСЕЛЕНИЕ Б', 2); }
   } else if (G.phase === 'landing') {
     const rem = PAD_B - G.s;
     const ts = rem > 0.5 ? clamp(rem * 0.32, 4, 64) : 0;
@@ -873,12 +873,12 @@ function updateLethe(dt, time) {
     G.spotters++;
     if (!G.droneHinted) {
       G.droneHinted = true;
-      toast('<b>Drones = LETHE\'s eyes.</b> Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i>', 6);
+      toast('<b>Drones = LETHE\'s eyes.</b> Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i>', 5);
     }
     if (nb < brackets.length) {
       V3.copy(d.wp).project(camera);
       const el = brackets[nb++];
-      if (V3.z < 1) {
+      if (V3.z < 1 && Math.abs(V3.x) < 0.9 && Math.abs(V3.y) < 0.85) {
         const sc = 0.85 + 0.25 * Math.sin(time * 12) + 0.3 * (1 - G.mark);
         el.style.display = 'block';
         el.style.transform = `translate(${(V3.x * 0.5 + 0.5) * innerWidth}px,${(-V3.y * 0.5 + 0.5) * innerHeight}px) scale(${sc})`;
@@ -1179,14 +1179,14 @@ function updateShipVisual(dt, time) {
   const gc = ship.glowColor;
   for (const nz of ship.nozzles) {
     nozW.copy(nz).applyMatrix4(ship.body.matrixWorld);
-    glows.add(nozW.x, nozW.y, nozW.z, gc.r, gc.g * 0.9, gc.b * 0.8, 0.55 * power, 2.6 * power);
-    glows.add(nozW.x, nozW.y, nozW.z, gc.r, gc.g * 0.8, gc.b * 0.6, 0.16 * power, 7 * power);
+    glows.add(nozW.x, nozW.y, nozW.z, gc.r, gc.g * 0.85, gc.b * 0.7, 0.5 * power, 2.0 * power);
+    glows.add(nozW.x, nozW.y, nozW.z, gc.r, gc.g * 0.7, gc.b * 0.5, 0.12 * power, 5.5 * power);
     if (!running) continue;
     if (G.underwater) {
       if (Math.random() < 0.8) mist.emit(nozW.x + (Math.random() - 0.5), nozW.y, nozW.z + (Math.random() - 0.5), shipVel.x * 0.2, 1 + Math.random() * 2, shipVel.z * 0.2, 1.4, 0.3, 0.9, 0.7, 1, 1, 0.75, -6, 1.5);
     } else {
       sparks.emit(nozW.x, nozW.y, nozW.z, shipVel.x * 0.4 - shipFwd.x * 20, shipVel.y * 0.4 - shipFwd.y * 20, shipVel.z * 0.4 - shipFwd.z * 20,
-        0.12 + G.boost * 0.1, 2.0, 0.6, gc.r, gc.g * 0.75, gc.b * 0.5, 0.5, 0, 0);
+        0.12 + G.boost * 0.1, 1.6, 0.5, gc.r, gc.g * 0.75, gc.b * 0.5, 0.35, 0, 0);
     }
   }
   // wing-tip nav lights
@@ -1235,8 +1235,11 @@ const CAM_MARGIN = 5;
 function updateCamera(dt, time) {
   const under = G.underwater;
   const start = G.phase === 'start';
-  const dist = (start ? 30 : 23.5) + G.boost * 2.6 - (under ? 5 : 0) + G.dip * 22;
-  const hgt = under ? 4.2 : (start ? 9 : 8.4 + G.boost * 0.8);
+  const wide = clamp((camera.aspect - 1.7) / 0.6, 0, 1);   // phones in landscape: a touch further
+  // slightly tighter in the narrow slots so the near wall doesn't fill the frame
+  G.camNarrow = (G.camNarrow || 0) + (narrowAt(G.s) - (G.camNarrow || 0)) * damp(1.5, dt);
+  const dist = (start ? 30 : 30 * (1 - 0.17 * G.camNarrow)) + G.boost * 2.6 - (under ? 6 : 0) + G.dip * 22;
+  const hgt = under ? 4.6 : (start ? 9 : 10.6 + wide * 0.6 + G.boost * 0.8);
   // behind the ship along its heading (start screen: slow cinematic orbit)
   const orbit = start ? 0.45 + Math.sin(time * 0.12) * 0.25 : 0;
   V1.set(-Math.sin(SF.th - G.yaw * 0.6 + orbit), 0, Math.cos(SF.th - G.yaw * 0.6 + orbit));
@@ -1357,10 +1360,11 @@ function updateHUD(dt, time) {
   hud.pips.classList.toggle('cd', G.rocketCd > 0);
   hud.rocketBtn.classList.toggle('empty', G.rockets <= 0);
   hud.rocketBtn.classList.toggle('cd', G.rocketCd > 0);
-  if (G.msgT > 0) { G.msgT -= dt; if (G.msgT <= 0) hud.msg.style.opacity = 0; }
-  if (G.toastT > 0) { G.toastT -= dt; if (G.toastT <= 0) hud.toast.classList.remove('on'); }
+  const rdt = realDt;
+  if (G.msgT > 0) { G.msgT -= rdt; if (G.msgT <= 0) hud.msg.style.opacity = 0; }
+  if (G.toastT > 0) { G.toastT -= rdt; if (G.toastT <= 0) hud.toast.classList.remove('on'); }
   if (G.popT > 0) {
-    G.popT -= dt;
+    G.popT -= rdt;
     hud.pop.style.transform = `translate(-50%,${-50 - (0.9 - G.popT) * 40}%)`;
     if (G.popT <= 0) hud.pop.style.opacity = 0;
   }
@@ -1495,11 +1499,12 @@ function updateAudioScene() {
 
 // ------------------------------------------------------------------ main loop
 const clock = new THREE.Clock();
-let time = 0, fps = 60, fpsAcc = 0, fpsN = 0, frames = 0;
+let realDt = 0.016, time = 0, fps = 60, fpsAcc = 0, fpsN = 0, frames = 0;
 const portraitMQ = matchMedia('(orientation: portrait) and (max-width: 900px)');
 function loop() {
   requestAnimationFrame(loop);
   const rawDt = clock.getDelta();
+  realDt = Math.min(rawDt, 0.25);
   let dt = Math.min(rawDt, 0.05);
   fpsAcc += rawDt; fpsN++;
   if (fpsAcc > 0.5) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
@@ -1589,6 +1594,12 @@ function loop() {
 }
 
 // ------------------------------------------------------------------ test hook
+function shipFrac() {
+  ship.group.updateMatrixWorld();
+  const a = ship.navLights[0].clone().applyMatrix4(ship.wings[0].matrixWorld).project(camera);
+  const b = ship.navLights[1].clone().applyMatrix4(ship.wings[1].matrixWorld).project(camera);
+  return +(Math.abs(a.x - b.x) / 2).toFixed(3);
+}
 function camGap() {
   const c = camera.position, pr = projectToPath(c.x, c.z, G.s - 20), y = Math.max(3, c.y);
   return +Math.min(wallLat(pr.s, y, 1) - pr.lat, wallLat(pr.s, y, -1) + pr.lat).toFixed(2);
@@ -1602,7 +1613,7 @@ window.__lethe = {
     rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol,
     shield: +G.shield.toFixed(1), mark: +G.mark.toFixed(3), spotters: G.spotters, lock: G.lock.phase,
     turretShotsFired: G.turretShotsFired, ebLog: G.ebLog.slice(-6), turretHits: G.turretHits, quality, fps: Math.round(fps),
-    camDist: +camera.position.distanceTo(shipPos).toFixed(2), camWallGap: camGap(), drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
+    camDist: +camera.position.distanceTo(shipPos).toFixed(2), shipFrac: shipFrac(), camWallGap: camGap(), drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
   }),
   start: startGame,
   retry: () => { reset(); startGame(); },
