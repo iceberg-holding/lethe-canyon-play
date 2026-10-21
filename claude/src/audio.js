@@ -2,7 +2,13 @@
 //   voices -> [panner] -> world bus -> underwater low-pass -> pre-master
 //            \-> reverb send (generated canyon impulse) + slap echo (delay feedback) -/
 //   pre-master -> bus compressor -> volume -> limiter -> destination
-const LS_KEY = 'lethe.audio';
+const LS_KEY = 'lethe.audio', LS_ENGINE = 'lethe.engine';
+export const ENGINES = [
+  { id: 'whisper', en: 'Jet whisper', ru: 'Шёпот' },
+  { id: 'turbine', en: 'Turbine', ru: 'Турбина' },
+  { id: 'ion', en: 'Ion hum', ru: 'Ионный гул' },
+];
+const ENGINE_ALIASES = { whisper: 'whisper', 'jet whisper': 'whisper', jet: 'whisper', turbine: 'turbine', ion: 'ion', 'ion hum': 'ion' };
 
 export class Audio {
   constructor() {
@@ -13,6 +19,8 @@ export class Audio {
       if (typeof s.vol === 'number') this.vol = Math.min(1, Math.max(0, s.vol));
       if (typeof s.muted === 'boolean') this.muted = s.muted;
     } catch (e) { /* private mode */ }
+    this.engine = 'whisper';
+    try { const e = localStorage.getItem(LS_ENGINE); if (ENGINE_ALIASES[e]) this.engine = ENGINE_ALIASES[e]; } catch (e) { /* ignore */ }
     this.gun = 0;
     this.listeners = [];
   }
@@ -48,26 +56,53 @@ export class Audio {
     const len = c.sampleRate * 2, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     this.noise = buf;
-    // soft-clip curve for grit (explosion crunch, boost growl)
+    // soft-clip curve for grit (explosion crunch)
     this.curve = new Float32Array(1024);
     for (let i = 0; i < 1024; i++) { const x = (i / 1023) * 2 - 1; this.curve[i] = Math.tanh(x * 3.2); }
 
-    // ---- engine: detuned saws + sub + filtered turbine noise; boost growl layer
-    this.engGain = c.createGain(); this.engGain.gain.value = 0;
-    this.engLP = c.createBiquadFilter(); this.engLP.type = 'lowpass'; this.engLP.frequency.value = 400; this.engLP.Q.value = 1.2;
-    this.osc1 = this.osc('sawtooth', 55, this.engLP); this.osc2 = this.osc('sawtooth', 55.7, this.engLP);
-    this.osc3 = this.osc('triangle', 110, this.engLP);
-    this.sub = c.createGain(); this.sub.gain.value = 0.5; this.sub.connect(this.engGain);
-    this.osc4 = this.osc('sine', 27.5, this.sub);
-    this.engLP.connect(this.engGain); this.engGain.connect(this.world);
-    this.turb = this.loopNoise('bandpass', 1200, 2.5);
-    this.growlG = c.createGain(); this.growlG.gain.value = 0;
-    const gws = c.createWaveShaper(); gws.curve = this.curve;
-    const glp = c.createBiquadFilter(); glp.type = 'lowpass'; glp.frequency.value = 900;
-    this.growl = this.osc('sawtooth', 41, gws);
-    this.growlLfo = this.osc('sine', 23, null);
-    const lfoG = c.createGain(); lfoG.gain.value = 6; this.growlLfo.connect(lfoG); lfoG.connect(this.growl.frequency);
-    gws.connect(glp); glp.connect(this.growlG); this.growlG.connect(this.world);
+    // ---- engine: light, airy presets on their own bus. Engine bus -> 2x high-pass (≈170 Hz, 24 dB/oct, no
+    // motorboat rumble) -> soft low-pass -> duck (dips under weapons / impacts so it never masks them) -> world
+    this.engBus = c.createGain(); this.engBus.gain.value = 0;
+    const hp1 = c.createBiquadFilter(); hp1.type = 'highpass'; hp1.frequency.value = 170; hp1.Q.value = 0.6;
+    const hp2 = c.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 170; hp2.Q.value = 0.6;
+    this.engSoft = c.createBiquadFilter(); this.engSoft.type = 'lowpass'; this.engSoft.frequency.value = 9000; this.engSoft.Q.value = 0.4;
+    this.engDuck = c.createGain(); this.engDuck.gain.value = 1;
+    this.engBus.connect(hp1); hp1.connect(hp2); hp2.connect(this.engSoft); this.engSoft.connect(this.engDuck); this.engDuck.connect(this.world);
+    this.eng = {};
+    // 'whisper' — airy filtered noise + faint high whine
+    {
+      const g = c.createGain(); g.gain.value = 0; g.connect(this.engBus);
+      const air = this.loopNoise('bandpass', 2200, 0.7, g), hiss = this.loopNoise('highpass', 6000, 0.5, g);
+      const wg = c.createGain(); wg.gain.value = 0; wg.connect(g);
+      const w1 = this.osc('sine', 2400, wg), w2 = this.osc('sine', 2412, wg);
+      const vib = this.osc('sine', 5.3, null), vg = c.createGain(); vg.gain.value = 7; vib.connect(vg); vg.connect(w1.frequency); vg.connect(w2.frequency);
+      this.eng.whisper = { g, air, hiss, wg, w1, w2 };
+    }
+    // 'turbine' — clean rising turbine whine (fundamental + soft 2nd harmonic + blade shimmer) tracking speed
+    {
+      const g = c.createGain(); g.gain.value = 0; g.connect(this.engBus);
+      const lvl = c.createGain(); lvl.gain.value = 0.045; lvl.connect(g);
+      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.9; bp.frequency.value = 1400; bp.connect(lvl);
+      const hg = c.createGain(); hg.gain.value = 0.32; hg.connect(bp);
+      const f1 = this.osc('sine', 700, bp), f2 = this.osc('triangle', 1404, hg), f3 = this.osc('sine', 703.5, bp);
+      const blades = this.loopNoise('bandpass', 2800, 6, g);
+      this.eng.turbine = { g, bp, f1, f2, f3, blades };
+    }
+    // 'ion' — soft smooth synthetic hum (open fifth, slow chorus) with a gentle tremolo shimmer on top
+    {
+      const g = c.createGain(); g.gain.value = 0; g.connect(this.engBus);
+      const lvl = c.createGain(); lvl.gain.value = 0.03; lvl.connect(g);
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1400; lp.Q.value = 0.3; lp.connect(lvl);
+      const h1 = this.osc('sine', 220, lp), h2 = this.osc('sine', 330.6, lp), h3 = this.osc('triangle', 440.8, lp), h4 = this.osc('sine', 221.2, lp);
+      const sg = c.createGain(); sg.gain.value = 0; const sh = this.osc('sine', 1760, sg), sh2 = this.osc('sine', 2641, sg);
+      const am = c.createGain(); am.gain.value = 0.5; am.connect(g); sg.connect(am);
+      const trem = this.osc('sine', 6.2, null), tg = c.createGain(); tg.gain.value = 0.5; trem.connect(tg); tg.connect(am.gain);
+      const ch = this.osc('sine', 0.23, null), cg = c.createGain(); cg.gain.value = 1.4; ch.connect(cg); cg.connect(h4.frequency);
+      this.eng.ion = { g, lp, h1, h2, h3, h4, sg, sh, sh2 };
+    }
+    // boost: an airy rising rush (no low growl)
+    this.boostAir = this.loopNoise('bandpass', 1800, 0.9, this.engBus);
+    this.previewUntil = 0;
     // ---- environment beds
     this.wind = this.loopNoise('bandpass', 900, 0.6);
     this.rush = this.loopNoise('lowpass', 700, 0.7);      // water rush when flying low
@@ -111,12 +146,12 @@ export class Audio {
     }
     return b;
   }
-  loopNoise(type, f, q) {
+  loopNoise(type, f, q, dest) {
     const c = this.ctx, src = c.createBufferSource();
     src.buffer = this.noise; src.loop = true;
     const fl = c.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q;
     const g = c.createGain(); g.gain.value = 0;
-    src.connect(fl); fl.connect(g); g.connect(this.world); src.start(0, Math.random() * 1.9);
+    src.connect(fl); fl.connect(g); g.connect(dest || this.world); src.start(0, Math.random() * 1.9);
     return { g, fl };
   }
   // ---------------------------------------------------------------- volume
@@ -134,14 +169,7 @@ export class Audio {
     const sp = Math.min(speed / 95, 1.2);
     const on = running ? 1 : 0;
     const swell = prox * prox;
-    this.set(this.engGain.gain, on * (0.07 + 0.05 * sp + boost * 0.035 + swell * 0.04));
-    const base = underwater ? 38 : 48 + sp * 34 + boost * 10 + swell * 6;
-    this.set(this.osc1.frequency, base); this.set(this.osc2.frequency, base * 1.012); this.set(this.osc3.frequency, base * 2.01); this.set(this.osc4.frequency, base * 0.5);
-    this.set(this.engLP.frequency, underwater ? 220 : 280 + sp * 700 + boost * 600 + swell * 900);
-    this.set(this.turb.g.gain, on * (underwater ? 0.02 : 0.025 + 0.03 * sp + boost * 0.03));
-    this.set(this.turb.fl.frequency, 700 + sp * 1600 + boost * 900);
-    this.set(this.growlG.gain, on * boost * (underwater ? 0 : 0.11));
-    this.set(this.growl.frequency, 36 + sp * 18);
+    this.updateEngine(sp, boost, underwater, running ? 1 : 0, swell);
     this.set(this.wind.g.gain, on * (underwater ? 0 : 0.03 + 0.09 * sp * sp + boost * 0.05 + swell * 0.16), prox > this.lastProx ? 0.05 : 0.25);
     this.set(this.wind.fl.frequency, 500 + sp * 900 + swell * 1400);
     const low = Math.max(0, 1 - Math.max(0, alt) / 9);
@@ -153,6 +181,59 @@ export class Audio {
     this.set(this.verbIn.gain, underwater ? 0.15 : 0.55);
     this.set(this.echoIn.gain, underwater ? 0 : 0.35);
     this.lastProx = prox;
+  }
+  // ---------------------------------------------------------------- engine presets
+  setEngine(name) {
+    const id = ENGINE_ALIASES[String(name).toLowerCase()];
+    if (!id) return this.engine;
+    this.engine = id;
+    try { localStorage.setItem(LS_ENGINE, id); } catch (e) { /* ignore */ }
+    return id;
+  }
+  engineInfo() { return ENGINES.find((e) => e.id === this.engine); }
+  // short audition of the current preset at cruise (start screen)
+  preview(sec = 1.6) { if (this.ctx) this.previewUntil = this.ctx.currentTime + sec; }
+  updateEngine(sp, boost, underwater, on, swell) {
+    const prev = this.ctx.currentTime < this.previewUntil;
+    if (prev && !on) { on = 1; sp = 0.75; boost = 0; underwater = false; swell = 0; }
+    const uw = underwater ? 0.55 : 1;
+    this.set(this.engBus.gain, on * uw * (0.85 + 0.25 * sp + 0.2 * swell), prev ? 0.05 : 0.08);
+    this.set(this.engSoft.frequency, underwater ? 1400 : 7000 + sp * 3000 + swell * 2000);
+    const sel = (id) => (this.engine === id ? 1 : 0);
+    const W = this.eng.whisper, T = this.eng.turbine, I = this.eng.ion;
+    // whisper
+    this.set(W.g.gain, sel('whisper'), 0.12);
+    this.set(W.air.g.gain, 0.05 + 0.05 * sp + boost * 0.03 + swell * 0.03);
+    this.set(W.air.fl.frequency, 1300 + sp * 1500 + boost * 900 + swell * 700);
+    this.set(W.hiss.g.gain, 0.012 + 0.014 * sp + boost * 0.012);
+    this.set(W.wg.gain, 0.0045 + 0.004 * sp + boost * 0.003);
+    const wf = 2100 + sp * 900 + boost * 400 + swell * 150;
+    this.set(W.w1.frequency, wf); this.set(W.w2.frequency, wf * 1.005);
+    // turbine
+    this.set(T.g.gain, sel('turbine'), 0.12);
+    const tf = 430 + sp * 620 + boost * 260 + swell * 60;
+    this.set(T.f1.frequency, tf, 0.25); this.set(T.f3.frequency, tf * 1.005, 0.25); this.set(T.f2.frequency, tf * 2.006, 0.25);
+    this.set(T.bp.frequency, tf * 1.6);
+        this.set(T.blades.g.gain, 0.012 + 0.016 * sp + boost * 0.016);
+    this.set(T.blades.fl.frequency, tf * 4);
+    // ion hum: an open fifth that lifts gently with speed; shimmer brightens with boost
+    this.set(I.g.gain, sel('ion'), 0.12);
+    const hf = 205 + sp * 40 + boost * 18;
+    this.set(I.h1.frequency, hf, 0.3); this.set(I.h4.frequency, hf * 1.006, 0.3); this.set(I.h2.frequency, hf * 1.5, 0.3); this.set(I.h3.frequency, hf * 2.003, 0.3);
+    this.set(I.lp.frequency, 700 + sp * 700 + boost * 500);
+    this.set(I.sg.gain, 0.012 + 0.012 * sp + boost * 0.02 + swell * 0.01);
+    this.set(I.sh.frequency, hf * 8, 0.3); this.set(I.sh2.frequency, hf * 12.01, 0.3);
+    // boost rush (all presets)
+    this.set(this.boostAir.g.gain, on * boost * (underwater ? 0 : 0.035));
+    this.set(this.boostAir.fl.frequency, 1500 + sp * 1200);
+  }
+  // briefly dip the engine so weapon / impact transients cut through
+  duck(depth = 0.45, hold = 0.12) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, g = this.engDuck.gain;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(1 - depth, t, 0.008);
+    g.setTargetAtTime(1, t + hold, 0.18);
   }
   // nearest drone: gain 0..1, pan -1..1, doppler ratio (approaching > 1)
   droneVoice(gain, pan, ratio) {
@@ -207,6 +288,7 @@ export class Audio {
     this.gun ^= 1;
     const v = 1 + (Math.random() * 2 - 1) * 0.07, pan = this.gun ? 0.22 : -0.22;
     const o = { pan, verb: 0.22, echo: 0.3 };
+    this.duck(0.35, 0.06);
     this.noiseHit('highpass', 3200 * v, 0.9, 0.42, 0.028, 0, { ...o, attack: 0.0008 });              // crack
     this.noiseHit('bandpass', 5200 * v, 3, 0.16, 0.05, 2400, { ...o, attack: 0.0008 });               // sizzle
     this.tone('sine', 1750 * v, 520 * v, 0.07, 0.045, 0, { pan, attack: 0.001 });                     // signature chirp
@@ -217,6 +299,7 @@ export class Audio {
   // heavy rocket: deep launch thump + rising whoosh + crackle
   rocket() {
     if (!this.ctx) return;
+    this.duck(0.6, 0.5);
     this.tone('sine', 95, 30, 0.75, 0.35, 0, { verb: 0.4, attack: 0.003 });
     this.tone('triangle', 55, 26, 0.4, 0.5, 0.01);
     this.noiseHit('lowpass', 260, 1.2, 0.5, 0.75, 2600, { verb: 0.35, echo: 0.25, attack: 0.02 });
@@ -226,6 +309,7 @@ export class Audio {
   // layered: crack + mid crunch + long sub rumble sweep + debris rattles; distance-scaled
   explosion(big = 1, near = 1, pan = 0) {
     const k = big * (0.3 + 0.7 * near), o = { pan: pan * 0.7, verb: 0.5, echo: 0.3 };
+    this.duck(0.3 + 0.4 * near, 0.25 + 0.4 * big);
     this.noiseHit('highpass', 2500, 0.8, 0.5 * k, 0.04, 0, { ...o, attack: 0.0008 });
     this.noiseHit('bandpass', 800, 0.9, 0.55 * k, 0.32 * big, 300, { ...o, drive: true });
     this.noiseHit('lowpass', 1600, 0.8, 0.45 * k, 1.1 * big, 70, o);
@@ -233,8 +317,11 @@ export class Audio {
     this.tone('triangle', 58, 22, 0.35 * k, 1.8 * big, 0.04);
     for (let i = 0; i < 7; i++) this.noiseHit('bandpass', 1800 + Math.random() * 3500, 6, 0.06 * k, 0.03, 0, { delay: 0.2 + Math.random() * 0.9, pan: pan + (Math.random() - 0.5) * 0.6 });
   }
+  // hit marker: crisp high double tick on the UI bus (cuts through everything); the score chime confirms the kill
+  hitTick() { this.duck(0.4, 0.1); this.tone('square', 2900, 2700, 0.045, 0.03, 0, { ui: true, attack: 0.0006 }); this.tone('sine', 4200, 3900, 0.04, 0.025, 0.035, { ui: true, attack: 0.0006 }); }
   impact() { this.noiseHit('bandpass', 2200, 1.5, 0.12, 0.05, 0, { echo: 0.2 }); this.tone('square', 600, 200, 0.02, 0.04); }
   shieldHit() {
+    this.duck(0.45, 0.2);
     this.tone('sine', 2500, 1250, 0.13, 0.22, 0, { attack: 0.001, verb: 0.2 });   // bright zing
     this.tone('sine', 3760, 1900, 0.05, 0.16, 0, { attack: 0.001 });
     this.noiseHit('bandpass', 4200, 4, 0.12, 0.12);
@@ -262,7 +349,7 @@ export class Audio {
     this.tone('sawtooth', 500, 90, 0.05, 0.25, 0, { pan });
   }
   lost() { this.tone('sine', 660, 330, 0.05, 0.6, 0, { ui: true }); }
-  hit() { this.tone('sine', 90, 40, 0.5, 0.35); this.tone('triangle', 220, 140, 0.18, 0.25); this.noiseHit('bandpass', 700, 1.2, 0.35, 0.3, 0, { drive: true, verb: 0.2 }); }
+  hit() { this.duck(0.5, 0.25); this.tone('sine', 90, 40, 0.5, 0.35); this.tone('triangle', 220, 140, 0.18, 0.25); this.noiseHit('bandpass', 700, 1.2, 0.35, 0.3, 0, { drive: true, verb: 0.2 }); }
   splash() { this.noiseHit('bandpass', 1400, 0.6, 0.45, 0.6, 400, { verb: 0.2 }); this.noiseHit('lowpass', 500, 0.7, 0.3, 0.4); this.tone('sine', 300, 90, 0.1, 0.25); }
   click() { if (this.ctx) this.noiseHit('highpass', 3500 + Math.random() * 2000, 0.5, 0.18 + Math.random() * 0.12, 0.008, 0, { ui: true, attack: 0.0005 }); }
   beep(f = 880) { this.tone('sine', f, f, 0.08, 0.12, 0, { ui: true }); }

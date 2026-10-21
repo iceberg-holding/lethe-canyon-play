@@ -6,20 +6,27 @@ export const input = {
   stick: { x: 0, y: 0, id: null, ox: 0, oy: 0 },
   tilt: { on: false, x: 0, y: 0, b0: null, g0: null },
   keys: new Set(), mouseFire: false, touchFire: false, touchBoost: false,
-  divePressed: false, rocketPressed: false,
+  divePressed: false, rocketPressed: false, active: false,
   consumeDive() { const d = this.divePressed; this.divePressed = false; return d; },
   consumeRocket() { const d = this.rocketPressed; this.rocketPressed = false; return d; },
 };
 
-const DIVE_KEYS = ['KeyC', 'KeyE', 'ControlLeft', 'ControlRight'];
+const DIVE_KEYS = ['KeyC', 'KeyE', 'KeyQ', 'ControlLeft', 'ControlRight'];
+const GAME_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyC', 'KeyE', 'KeyQ', 'KeyM', 'KeyV', 'KeyH', 'Space',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ControlLeft', 'ControlRight', 'ShiftLeft', 'ShiftRight'];
 export function setupInput(canvas) {
+  canvas.tabIndex = -1;   // focusable, so keys keep flowing to the game after clicking it
   addEventListener('keydown', (e) => {
+    if (e.altKey || e.metaKey) return;   // leave OS / browser chords alone
     if (DIVE_KEYS.includes(e.code) && !e.repeat) input.divePressed = true;
     if (e.code === 'KeyR' && !e.repeat) input.rocketPressed = true;
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ControlLeft', 'ControlRight'].includes(e.code)) e.preventDefault();
+    // game keys never reach the browser: blocks page scroll and Ctrl+S / Ctrl+D / Ctrl+A / Ctrl+R… while Ctrl
+    // is used as a dive key (Ctrl+W / Ctrl+T cannot be blocked by any page; a leave-page guard covers those)
+    if (GAME_KEYS.includes(e.code) && input.active) e.preventDefault();
+    else if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
     input.keys.add(e.code);
-  });
-  addEventListener('keyup', (e) => input.keys.delete(e.code));
+  }, { capture: true });
+  addEventListener('keyup', (e) => input.keys.delete(e.code), { capture: true });
   addEventListener('blur', () => { input.keys.clear(); input.mouseFire = false; });
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'mouse') return;

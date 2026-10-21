@@ -12,7 +12,7 @@ import {
 } from './terrain.js';
 import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js';
 import { Ship, makeEnvMap } from './ship.js';
-import { Audio } from './audio.js';
+import { Audio, ENGINES } from './audio.js';
 import { input, setupInput, pollInput } from './input.js';
 import { Post, QualityGovernor, TIERS } from './post.js';
 
@@ -249,7 +249,7 @@ const hud = {
   rowCargo: $('rCargoRow'), rowShield: $('rShieldRow'), rowHealth: $('rHealthRow'),
   air: $('tAir'), airBox: $('airBox'), msg: $('msg'), pop: $('pop'), toast: $('toast'), markBox: $('markBox'), mark: $('tMark'), sDown: $('sDown'),
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
-  dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'),
+  dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'),
 };
 for (let i = 0; i < ROCKET_AMMO; i++) hud.pips.appendChild(document.createElement('i'));
 const zoneEls = ZONES.map((z) => {
@@ -276,7 +276,7 @@ function freshState() {
     cargo: 100, health: 100, air: 60, score: 0, dive: false, underwater: false, hitCd: 0, rad: 0,
     yaw: 0, pitch: 0, roll: 0, phaseT: 0, fireCd: 0, gun: 0, shake: 0, hitFlash: 0,
     kills: 0, mastsBroken: 0, outcome: null, reason: '', finalScore: 0, wasUnder: false, lastZone: null,
-    msgT: 0, popT: 0, beepT: 0, airOut: false, toastT: 0,
+    msgT: 0, popT: 0, beepT: 0, airOut: false, toastT: 0, toastQ: [], seen: {}, rkLog: [], turretHinted: false, legendT: 20,
     shield: 100, shieldCd: 0, shieldOn: 1, shieldFlash: 0, shieldHit: 0, regen: false,
     mark: 0, spotters: 0, markBeep: 0, lock: { phase: 'none', t: 0, turret: null, shots: 0 }, droneHinted: false, lostSaid: false,
     turretShotsFired: 0, turretHits: 0, ebLog: [], turretKills: 0, apDiveT: 0, muzzleT: 0,
@@ -303,10 +303,16 @@ function popScore(text) {
   hud.pop.style.transform = 'translate(-50%,-50%) scale(1.1)';
   G.popT = 0.9;
 }
-function toast(html, dur = 5) {
+// toasts queue up (a hint never wipes another one); `now` replaces the current one (engine switch)
+function toast(html, dur = 5, now = false) {
+  if (G.toastT > 0 && !now) { G.toastQ.push([html, dur]); return; }
   hud.toast.innerHTML = html;
   hud.toast.classList.add('on');
   G.toastT = dur;
+}
+function hitMarker() {
+  const el = hud.hitx;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on', 'kill');
 }
 function pulseRow(el) {
   el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
@@ -623,18 +629,8 @@ function fire() {
   ship.body.updateMatrixWorld();
   const p = ship.body.localToWorld(V1.copy(m));
   let dir = V2.copy(shipFwd);
-  // gentle aim assist toward drones / beacons only (never masts or turrets)
-  let best = null, bestA = 0.075;
-  const consider = (wp) => {
-    V3.copy(wp).sub(p);
-    const d = V3.length();
-    if (d < 15 || d > 240) return;
-    const a = Math.acos(clamp(V3.dot(shipFwd) / d, -1, 1));
-    if (a < bestA) { bestA = a; best = wp; }
-  };
-  for (const d of DRONES) if (d.alive && Math.abs(d.s - G.s) < 260) consider(d.wp);
-  for (const b of BEACONS) if (b.alive && Math.abs(b.s - G.s) < 260) consider(b.wp);
-  if (best) dir = V2.copy(best).sub(p).normalize();
+  const at = aimTarget(p);
+  if (at) dir = V2.copy(at.wp).sub(p).normalize();
   const b = bolts.find((x) => !x.on);
   if (!b) return;
   b.on = true; b.p.copy(p); b.q.copy(p); b.o.copy(p); b.d.copy(dir); b.life = BOLT_LIFE; b.s = G.s;
@@ -647,6 +643,56 @@ function fire() {
   G.micro = Math.min(0.1, G.micro + 0.05);
   G.jolt = 0.14;
   audio.shot();
+}
+
+// aim assist: drones / beacons inside a ~6° cone; rim turrets inside a horizontal cone with generous vertical
+// reach (bolts angle up to the ledges). Only with a clear line of fire; never toward a mast, and never when a mast
+// sits on the line of fire.
+const AIM_CONE = 0.105, AIM_TURRET_H = 0.2, AIM_TURRET_UP = 0.62, AIM_RANGE = 240;
+const AIM_H = new THREE.Vector3(), AIM_D = new THREE.Vector3();
+const aimHit = { obj: null, kind: '', wp: null };
+function mastOnLine(p, wp) {
+  for (const m of MASTS) {
+    if (!m.alive || Math.abs(m.s - G.s) > 300) continue;
+    for (const pt of m.pts) {
+      AIM_D.copy(wp).sub(p);
+      const l2 = AIM_D.lengthSq() || 1;
+      const t = clamp(((pt.x - p.x) * AIM_D.x + (pt.y - p.y) * AIM_D.y + (pt.z - p.z) * AIM_D.z) / l2, 0, 1);
+      if (V4.copy(p).addScaledVector(AIM_D, t).distanceToSquared(pt) < 4.5 * 4.5) return true;
+    }
+  }
+  return false;
+}
+function aimTarget(p, widen = 1) {
+  if (G.phase !== 'flight' || G.underwater) return null;
+  AIM_H.set(shipFwd.x, 0, shipFwd.z).normalize();
+  const fwdEl = Math.asin(clamp(shipFwd.y, -1, 1));
+  let best = null, bestK = '', bestScore = 1e9;
+  const consider = (o, kind) => {
+    V3.copy(o.wp).sub(p);
+    const d = V3.length();
+    if (d < 15 || d > AIM_RANGE) return;
+    let score;
+    if (kind === 'turret') {
+      const hl = Math.hypot(V3.x, V3.z) || 1;
+      const ah = Math.acos(clamp((V3.x * AIM_H.x + V3.z * AIM_H.z) / hl, -1, 1));
+      const ev = Math.atan2(V3.y, hl) - fwdEl;
+      if (ah > AIM_TURRET_H * widen || ev < -0.12 || ev > AIM_TURRET_UP) return;
+      score = ah * 1.4 + Math.abs(ev) * 0.25;
+    } else {
+      const a = Math.acos(clamp(V3.dot(shipFwd) / d, -1, 1));
+      if (a > AIM_CONE * widen) return;
+      score = a;
+    }
+    if (score >= bestScore || mastOnLine(p, o.wp) || !viewLOS(p, o.wp, G.s)) return;
+    bestScore = score; best = o; bestK = kind;
+  };
+  for (const d of DRONES) if (d.alive && Math.abs(d.s - G.s) < 260) consider(d, 'drone');
+  for (const b of BEACONS) if (b.alive && Math.abs(b.s - G.s) < 260) consider(b, 'beacon');
+  for (const t of TURRETS) if (t.alive && Math.abs(t.s - G.s) < 260) consider(t, 'turret');
+  if (!best) return null;
+  aimHit.obj = best; aimHit.kind = bestK; aimHit.wp = best.wp;
+  return aimHit;
 }
 
 // ------------------------------------------------------------------ rockets (heavy weapon)
@@ -662,7 +708,7 @@ function findRocketTarget(from, dir) {
   let best = null, bc = 0;
   for (const d of DRONES) if (d.alive && Math.abs(d.s - G.s) < 400) { const c = rocketTargetOK(d.wp, from, dir, 0.975, 380); if (c > bc) { bc = c; best = d; } }
   for (const t of TURRETS) if (t.alive && Math.abs(t.s - G.s) < 400) { const c = rocketTargetOK(t.wp, from, dir, 0.975, 380); if (c > bc) { bc = c; best = t; } }
-  return best;
+  return best && viewLOS(from, best.wp, G.s) ? best : null;
 }
 function fireRocket() {
   if (G.rocketCd > 0) return;
@@ -672,9 +718,13 @@ function fireRocket() {
   G.rockets--; G.rocketsFired++; G.rocketCd = ROCKET_CD;
   ship.body.updateMatrixWorld();
   const p = ship.body.localToWorld(V1.set(0, -1.15, -5.5));
-  r.on = true; r.p.copy(p); r.q.copy(p); r.life = 3.2; r.s = G.s; r.age = 0;
-  r.v.copy(shipVel).addScaledVector(shipFwd, 25);
-  r.target = findRocketTarget(p, shipFwd);
+  r.on = true; r.p.copy(p); r.q.copy(p); r.life = 3.2; r.s = G.s; r.age = 0; r.from = `${G.s.toFixed(0)}/${G.lat.toFixed(0)}/${G.y.toFixed(0)}`;
+  const at = aimTarget(p, 1.4);   // rockets are deliberate: a slightly wider lock than the cannon
+  r.target = at && at.kind !== 'beacon' ? at.obj : findRocketTarget(p, shipFwd);
+  // rim turret lock: launch straight along the line of fire (a pursuit curve would graze the wall below the ledge);
+  // otherwise inherit the ship's velocity plus a forward kick
+  if (r.target && TURRETS.includes(r.target)) r.v.copy(r.target.wp).sub(p).normalize().multiplyScalar(shipVel.length() + 25);
+  else r.v.copy(shipVel).addScaledVector(shipFwd, 25);
   // recoil: forward dip, nose kick, camera push-back + short shake
   G.recoilT = 0; G.kick = 1;
   G.shake = Math.min(1.4, G.shake + 0.42);
@@ -687,6 +737,8 @@ function detonateRocket(r, direct) {
   const p = r.p;
   r.on = false;
   explode(p, 1.6);
+  let nt = 1e9; for (const t of TURRETS) if (t.alive) nt = Math.min(nt, t.wp.distanceTo(p));
+  G.rkLog.push(`${direct || ''}age${r.age.toFixed(2)} s${r.s.toFixed(0)} y${p.y.toFixed(1)} turret${nt.toFixed(0)}m tgt:${r.target ? (r.target.s.toFixed(0) + '/' + r.target.lat.toFixed(0) + '/' + r.target.y.toFixed(0)) : '-'} from:${r.from}`);
   // splash damage: everything near the blast — including the force-field masts (risky!)
   for (const d of DRONES) if (d.alive && d.wp.distanceTo(p) < ROCKET_SPLASH) killTarget('drone', d);
   for (const b of BEACONS) if (b.alive && b.wp.distanceTo(p) < ROCKET_SPLASH) killTarget('beacon', b);
@@ -706,14 +758,15 @@ function updateRockets(dt) {
     if (r.target && r.target.alive) {
       V4.copy(r.target.wp).sub(r.p).normalize();
       const ang = Math.acos(clamp(V3.dot(V4), -1, 1));
-      if (ang > 1e-4) V3.lerp(V4, Math.min(1, (1.3 * dt) / ang)).normalize();
+      const rate = TURRETS.includes(r.target) ? 2.4 : 1.3;   // turrets sit high on the ledges: steeper climb
+      if (ang > 1e-4) V3.lerp(V4, Math.min(1, (rate * dt) / ang)).normalize();
     }
     r.v.copy(V3).multiplyScalar(sp);
     r.q.copy(r.p);
     r.p.addScaledVector(r.v, dt);
-    let hit = r.life <= 0;
+    let hit = r.life <= 0 ? 'timeout ' : false;
     if (!hit) for (const d of DRONES) if (d.alive && Math.abs(d.s - r.s) < 50 && segSphere(r.q, r.p, d.wp, 3.2)) { hit = true; break; }
-    if (!hit) for (const t of TURRETS) if (t.alive && Math.abs(t.s - r.s) < 50 && segSphere(r.q, r.p, t.wp, 3)) { hit = true; break; }
+    if (!hit) for (const t of TURRETS) if (t.alive && Math.abs(t.s - r.s) < 50 && segSphere(r.q, r.p, t.wp, 3)) { hit = 'turret '; break; }
     if (!hit) for (const b of BEACONS) if (b.alive && Math.abs(b.s - r.s) < 50 && segSphere(r.q, r.p, b.wp, 2.4)) { hit = true; break; }
     if (!hit) for (const m of MASTS) if (m.alive && Math.abs(m.s - r.s) < 50 && m.pts.some((pt) => segSphere(r.q, r.p, pt, 2.1))) { hit = true; break; }
     if (!hit && r.age > 0.08) {
@@ -721,11 +774,11 @@ function updateRockets(dt) {
       const pr = projectToPath(r.p.x, r.p.z, r.s);
       r.s = pr.s;
       const side = pr.lat > 0 ? 1 : -1;
-      if (side * pr.lat > wallLat(r.s, r.p.y, side) || r.p.y < 0) hit = true;
+      if (side * pr.lat > wallLat(r.s, r.p.y, side) || r.p.y < 0) hit = 'world ';
       else for (const k of ROCKS) if (Math.abs(k.s - r.s) < k.r + 2 && r.p.y < k.h && Math.abs(k.lat - pr.lat) < k.r) { hit = true; break; }
       if (!hit) for (const a of ARCHES) if (Math.abs(a.s - r.s) < a.ht && r.p.y > archBottom(a, pr.lat) && r.p.y < archTop(a, pr.lat)) { hit = true; break; }
     }
-    if (hit) { detonateRocket(r); continue; }
+    if (hit) { detonateRocket(r, hit === true ? '' : hit); continue; }
     // visible smoke trail + orange exhaust glow + flame
     V3.copy(r.v).normalize();
     const tail = V4.copy(r.p).addScaledVector(V3, -1.2);
@@ -752,7 +805,8 @@ function killTarget(kind, obj) {
   const pts = kind === 'drone' ? 150 : kind === 'turret' ? 250 : 100;
   G.score += pts;
   explode(kind === 'turret' ? obj.wp : obj.wp, kind === 'beacon' ? 0.8 : kind === 'turret' ? 1.3 : 1);
-  audio.score();
+  audio.hitTick(); audio.score();
+  hitMarker();
   const label = { drone: 'SPOTTER / ДРОН', beacon: 'BEACON / МАЯК', turret: 'TURRET / ТУРЕЛЬ' }[kind];
   popScore(`+${pts} ${label}`);
   if (kind === 'beacon') { beacons.setMatrixAt(BEACONS.indexOf(obj), ZERO_M); beacons.instanceMatrix.needsUpdate = true; }
@@ -1321,8 +1375,148 @@ function updateCamera(dt, time) {
   mu.uOp.value = cu ? 0.7 : 0.55;
 }
 
+// ------------------------------------------------------------------ targeting HUD: reticle, markers, mast tags
+let hudT = 0, legendMode = 'auto';
+const RET = { x: 0, y: 0, init: false, lock: false };
+const MUZ = new THREE.Vector3(), RAY = new THREE.Vector3();
+function toScreen(v, out) {
+  reticleV.copy(v).project(camera);
+  out.x = (reticleV.x * 0.5 + 0.5) * innerWidth; out.y = (-reticleV.y * 0.5 + 0.5) * innerHeight; out.z = reticleV.z;
+  out.on = reticleV.z < 1 && Math.abs(reticleV.x) < 1.02 && Math.abs(reticleV.y) < 1.02;
+  return out;
+}
+// where a bolt fired now actually goes: the assisted target, else the first wall / water / rock / arch hit along
+// the bolt line (from between the muzzles), else the end of the bolt's range
+function boltAimPoint(out) {
+  ship.body.updateMatrixWorld();
+  ship.body.localToWorld(MUZ.copy(ship.muzzles[0]).add(ship.muzzles[1]).multiplyScalar(0.5));
+  const at = aimTarget(MUZ);
+  if (at) { out.copy(at.wp); return at; }
+  const range = BOLT_SPEED * BOLT_LIFE;
+  let s = G.s;
+  for (let d = 20; d <= range; d += 12) {
+    RAY.copy(MUZ).addScaledVector(shipFwd, d);
+    const pr = projectToPath(RAY.x, RAY.z, s); s = pr.s;
+    const side = pr.lat > 0 ? 1 : -1;
+    let hit = RAY.y < 0 || side * pr.lat > wallLat(s, RAY.y, side);
+    if (!hit) for (const r of ROCKS) if (Math.abs(r.s - s) < r.r + 2 && RAY.y < r.h && Math.abs(r.lat - pr.lat) < r.r) { hit = true; break; }
+    if (!hit) for (const a of ARCHES) if (Math.abs(a.s - s) < a.ht && RAY.y > archBottom(a, pr.lat) && RAY.y < archTop(a, pr.lat)) { hit = true; break; }
+    if (hit) { out.copy(MUZ).addScaledVector(shipFwd, Math.max(30, d - 6)); return null; }
+  }
+  out.copy(MUZ).addScaledVector(shipFwd, Math.min(range, 170));
+  return null;
+}
+const AIMP = new THREE.Vector3(), SCR = { x: 0, y: 0, z: 0, on: false }, SCR2 = { x: 0, y: 0, z: 0, on: false };
+let aimObj = null;
+function updateReticle(rdt) {
+  const vis = G.phase === 'flight' && !G.underwater;
+  aimObj = null;
+  if (vis) {
+    const at = boltAimPoint(AIMP);
+    aimObj = at ? at.obj : null;
+    toScreen(AIMP, SCR);
+  }
+  const show = vis && SCR.z < 1;
+  hud.reticle.style.display = show ? 'block' : 'none';
+  if (!show) { RET.init = false; return; }
+  // snaps quickly onto an assisted target, glides otherwise (no jitter from the wall ray)
+  const k = !RET.init ? 1 : damp(aimObj ? 22 : 14, rdt);
+  RET.x += (SCR.x - RET.x) * k; RET.y += (SCR.y - RET.y) * k; RET.init = true;
+  hud.reticle.style.transform = `translate(${RET.x}px,${RET.y}px)`;
+  hud.hitx.style.transform = `translate(${RET.x}px,${RET.y}px)`;
+  if (!!aimObj !== RET.lock) { RET.lock = !!aimObj; hud.reticle.classList.toggle('lock', RET.lock); }
+}
+// line of sight camera -> point against the analytic canyon walls and arches
+function viewLOS(a, b, s0) {
+  for (let k = 1; k < 6; k++) {
+    LOS_P.lerpVectors(a, b, k / 6);
+    const pr = projectToPath(LOS_P.x, LOS_P.z, s0);
+    s0 = pr.s;
+    const side = pr.lat > 0 ? 1 : -1;
+    if (side * pr.lat > wallLat(pr.s, LOS_P.y, side) + 0.5) return false;
+    for (const ar of ARCHES) if (Math.abs(ar.s - pr.s) < ar.ht && LOS_P.y > archBottom(ar, pr.lat) && LOS_P.y < archTop(ar, pr.lat)) return false;
+    for (const r of ROCKS) if (Math.abs(r.s - pr.s) < r.r && LOS_P.y < r.h && Math.abs(r.lat - pr.lat) < r.r) return false;
+  }
+  return true;
+}
+const TGT_N = 10, TGT_RANGE = 260;
+const TGT_LABEL = { turret: 'TURRET / ТУРЕЛЬ', drone: 'DRONE / ДРОН', beacon: 'BEACON / МАЯК' };
+const TGT_R = { turret: 2.6, drone: 2.4, beacon: 2.2 };
+const tgtEls = [], mtagEls = [];
+for (let i = 0; i < TGT_N; i++) {
+  const el = document.createElement('div'); el.className = 'tgt'; el.innerHTML = '<span></span>';
+  $('tgts').appendChild(el); tgtEls.push({ el, span: el.firstChild, label: '', aim: false });
+}
+for (let i = 0; i < 2; i++) {
+  const el = document.createElement('div'); el.className = 'mtag'; el.innerHTML = '<span>DO NOT HIT / НЕ СТРЕЛЯТЬ</span>';
+  $('tgts').appendChild(el); mtagEls.push(el);
+}
+const tgtCand = [];
+function updateMarkers(rdt) {
+  let n = 0, nm = 0;
+  if (G.phase === 'flight' && !camUnder) {
+    tgtCand.length = 0;
+    const cp = camera.position;
+    const add = (o, kind) => {
+      if (!o.alive || Math.abs(o.s - G.s) > TGT_RANGE + 30) return;
+      const d = o.wp.distanceTo(shipPos);
+      if (d > TGT_RANGE || o.wp.distanceTo(cp) < 12) return;
+      tgtCand.push({ o, kind, d });
+    };
+    for (const d of DRONES) if (!d.spotting) add(d, 'drone');   // spotting drones carry the red LETHE bracket
+    for (const b of BEACONS) add(b, 'beacon');
+    for (const t of TURRETS) add(t, 'turret');
+    tgtCand.sort((a, b) => a.d - b.d);
+    const fy = Math.tan((camera.fov * Math.PI) / 360);
+    for (const c of tgtCand) {
+      if (n >= TGT_N) break;
+      toScreen(c.o.wp, SCR2);
+      if (!SCR2.on || !viewLOS(cp, c.o.wp, G.s - 20)) continue;
+      const dc = c.o.wp.distanceTo(cp);
+      const size = clamp((TGT_R[c.kind] * 2.2 * innerHeight) / (2 * dc * fy), 18, 54);
+      const m = tgtEls[n++];
+      // first sighting of each type gets a label for a few seconds
+      const seen = G.seen[c.kind];
+      if (!seen) {
+        G.seen[c.kind] = { o: c.o, t: 4.5 };
+        if (c.kind === 'turret' && !G.turretHinted) {
+          G.turretHinted = true;
+          toast('<b>Turrets on the rims fire when a drone marks you.</b> Shoot them or the drone.<br><i>Турели стреляют по метке дрона — сбей их или дрон.</i>', 6);
+        }
+      }
+      const label = seen && seen.o === c.o && seen.t > 0 ? TGT_LABEL[c.kind] : '';
+      if (label !== m.label) { m.label = label; m.span.textContent = label; }
+      const aim = c.o === aimObj;
+      if (aim !== m.aim) { m.aim = aim; m.el.classList.toggle('aim', aim); }
+      m.el.style.display = 'block';
+      m.el.style.width = m.el.style.height = size.toFixed(0) + 'px';
+      m.el.style.transform = `translate(${(SCR2.x - size / 2).toFixed(1)}px,${(SCR2.y - size / 2).toFixed(1)}px)`;
+    }
+    for (const k in G.seen) G.seen[k].t -= rdt;
+    // masts: a cyan DO NOT HIT tag the first time each one comes near
+    for (const m of MASTS) {
+      if (!m.alive || m.tagT === 0 || nm >= mtagEls.length) continue;
+      const d = m.pts[1].distanceTo(shipPos);
+      if (m.tagT === undefined) {
+        if (d > 210 || m.s < G.s) continue;
+        toScreen(m.pts[1], SCR2);
+        if (!SCR2.on || !viewLOS(cp, m.pts[1], G.s - 20)) continue;
+        m.tagT = 4;
+      }
+      m.tagT = Math.max(0, m.tagT - rdt);
+      toScreen(m.pts[1], SCR2);
+      if (m.tagT > 0 && SCR2.on) {
+        const el = mtagEls[nm++];
+        el.style.display = 'block';
+        el.style.transform = `translate(${SCR2.x.toFixed(1)}px,${SCR2.y.toFixed(1)}px)`;
+      }
+    }
+  }
+  for (let i = n; i < TGT_N; i++) if (tgtEls[i].el.style.display !== 'none') tgtEls[i].el.style.display = 'none';
+  for (let i = nm; i < mtagEls.length; i++) if (mtagEls[i].style.display !== 'none') mtagEls[i].style.display = 'none';
+}
+
 // ------------------------------------------------------------------ HUD
-let hudT = 0;
 const reticleV = new THREE.Vector3();
 const disp = { cargo: 100, shield: 100, health: 100, gc: 100, gs: 100, gh: 100 };
 function setBar(b, v, ghost) {
@@ -1362,16 +1556,25 @@ function updateHUD(dt, time) {
   hud.rocketBtn.classList.toggle('cd', G.rocketCd > 0);
   const rdt = realDt;
   if (G.msgT > 0) { G.msgT -= rdt; if (G.msgT <= 0) hud.msg.style.opacity = 0; }
-  if (G.toastT > 0) { G.toastT -= rdt; if (G.toastT <= 0) hud.toast.classList.remove('on'); }
+  if (G.toastT > 0) {
+    G.toastT -= rdt;
+    if (G.toastT <= 0) { hud.toast.classList.remove('on'); G.toastT = -0.5; }   // short gap before a queued one
+  } else if (G.toastT < 0) {
+    G.toastT = Math.min(0, G.toastT + rdt);
+    if (G.toastT === 0 && G.toastQ.length) { const [h, d] = G.toastQ.shift(); toast(h, d); }
+  }
   if (G.popT > 0) {
     G.popT -= rdt;
     hud.pop.style.transform = `translate(-50%,${-50 - (0.9 - G.popT) * 40}%)`;
     if (G.popT <= 0) hud.pop.style.opacity = 0;
   }
-  reticleV.copy(shipPos).addScaledVector(shipFwd, 140).project(camera);
-  const vis = G.phase === 'flight' && !G.underwater && reticleV.z < 1;
-  hud.reticle.style.display = vis ? 'block' : 'none';
-  if (vis) hud.reticle.style.transform = `translate(${(reticleV.x * 0.5 + 0.5) * innerWidth}px,${(-reticleV.y * 0.5 + 0.5) * innerHeight}px)`;
+  camera.updateMatrixWorld();
+  updateReticle(rdt);
+  updateMarkers(rdt);
+  // desktop key legend: first ~20 s of flight, then fades; H toggles
+  if (G.phase === 'flight' && G.legendT > 0 && legendMode === 'auto') G.legendT -= rdt;
+  const legendOn = document.body.classList.contains('playing') && (legendMode === 'on' || (legendMode === 'auto' && G.legendT > 0));
+  hud.keys.classList.toggle('on', legendOn);
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.1;
@@ -1407,6 +1610,7 @@ function showResult() {
   $('rScore').textContent = G.finalScore + (ok ? ` (+${timeBonus})` : '');
   $('result').classList.remove('hide');
   document.body.classList.remove('playing');
+  input.active = false;
 }
 
 function reset() {
@@ -1424,6 +1628,7 @@ function reset() {
   ship.diveT = 0;
   camInit = false;
   hud.toast.classList.remove('on');
+  for (const m of MASTS) delete m.tagT;
 }
 
 function startGame() {
@@ -1432,6 +1637,10 @@ function startGame() {
   $('start').classList.add('hide');
   $('result').classList.add('hide');
   document.body.classList.add('playing');
+  input.active = true;
+  // keyboard focus: drop it from the clicked button (a focused hidden button would eat Space/Enter) onto the canvas
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  try { renderer.domElement.focus({ preventScroll: true }); window.focus(); } catch (e) { /* ignore */ }
   G.phase = 'takeoff'; G.phaseT = 0; G.t = 0;
   showMsg('TAKEOFF — SETTLEMENT A', 'ВЗЛЁТ — ПОСЕЛЕНИЕ А', 2.2);
 }
@@ -1451,7 +1660,46 @@ function syncSnd(muted) {
 audio.listeners.push(syncSnd);
 syncSnd(audio.muted);
 hud.snd.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); audio.init(); audio.toggleMute(); });
+// ---- engine sound presets: start-screen segmented control (with audition), HUD gear button, V key
+const engSeg = document.querySelector('#engSel .seg');
+for (const e of ENGINES) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.dataset.e = e.id; b.innerHTML = `${e.en}<small>${e.ru}</small>`;
+  b.addEventListener('click', (ev) => { ev.stopPropagation(); audio.init(); setEngine(e.id); audio.preview(); b.blur(); });
+  b.addEventListener('keydown', (ev) => ev.stopPropagation());
+  engSeg.appendChild(b);
+}
+function syncEngine() {
+  for (const b of engSeg.children) b.classList.toggle('on', b.dataset.e === audio.engine);
+  const info = audio.engineInfo();
+  hud.engBtn.title = `Engine sound (V): ${info.en} / ${info.ru}`;
+}
+function setEngine(name, announce = false) {
+  audio.setEngine(name);
+  syncEngine();
+  if (announce) {
+    const info = audio.engineInfo();
+    toast(`ENGINE SOUND · <b>${info.en}</b> <i>/ ${info.ru}</i>`, 1.6, true);
+  }
+}
+function cycleEngine() {
+  audio.init();
+  setEngine(ENGINES[(ENGINES.findIndex((e) => e.id === audio.engine) + 1) % ENGINES.length].id, G.phase !== 'start');
+  if (G.phase === 'start' || G.phase === 'result') audio.preview();
+}
+syncEngine();
+hud.engBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); cycleEngine(); });
+// leaving mid-flight (e.g. Ctrl+W while Ctrl is the dive key) asks first
+addEventListener('beforeunload', (e) => {
+  if (G.phase === 'flight' || G.phase === 'takeoff' || G.phase === 'landing') { e.preventDefault(); e.returnValue = ''; }
+});
 addEventListener('keydown', (e) => {
+  if (e.altKey || e.metaKey) return;
+  if (e.code === 'KeyV' && !e.repeat) cycleEngine();
+  if (e.code === 'KeyH' && !e.repeat && G.phase !== 'start') {
+    const visible = legendMode === 'on' || (legendMode === 'auto' && G.legendT > 0);
+    legendMode = visible ? 'off' : 'on';
+  }
   if (e.code === 'KeyM' && !e.repeat) audio.toggleMute();
   if (e.code === 'Enter' || e.code === 'Space') {
     if (G.phase === 'start') startGame();
@@ -1610,9 +1858,11 @@ window.__lethe = {
     health: +Math.max(0, G.health).toFixed(1), air: +G.air.toFixed(1), score: G.phase === 'result' ? G.finalScore : G.score,
     underwater: G.underwater, phase: G.phase, outcome: G.outcome, s: +G.s.toFixed(1), lat: +G.lat.toFixed(2), y: +G.y.toFixed(2),
     dive: G.dive, radiation: +G.rad.toFixed(3), mastsBroken: G.mastsBroken, kills: G.kills,
-    rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol,
+    rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol, engineSound: audio.engine,
+    aim: aimObj ? (TURRETS.includes(aimObj) ? 'turret' : DRONES.includes(aimObj) ? 'drone' : 'beacon') : null, turretKills: G.turretKills,
+    markers: tgtEls.filter((m) => m.el.style.display === 'block').length, legend: hud.keys.classList.contains('on'),
     shield: +G.shield.toFixed(1), mark: +G.mark.toFixed(3), spotters: G.spotters, lock: G.lock.phase,
-    turretShotsFired: G.turretShotsFired, ebLog: G.ebLog.slice(-6), turretHits: G.turretHits, quality, fps: Math.round(fps),
+    turretShotsFired: G.turretShotsFired, ebLog: G.ebLog.slice(-6), rkLog: G.rkLog.slice(-4), turretHits: G.turretHits, quality, fps: Math.round(fps),
     camDist: +camera.position.distanceTo(shipPos).toFixed(2), shipFrac: shipFrac(), camWallGap: camGap(), drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
   }),
   start: startGame,
@@ -1630,8 +1880,16 @@ window.__lethe = {
     forceMark: (v = 1) => { G.mark = v; },
     damageShield: (n = 30) => damage(n, V4.copy(shipPos).addScaledVector(shipFwd, 6).clone(), 'debug'),
     setQuality: (q) => applyQuality(q),
+    setEngine: (name) => { setEngine(name); return audio.engine; },
+    // park the ship below a live turret (index into TURRETS), flying toward it from `back` metres
+    nearTurret: (i = 0, back = 150) => {
+      const t = TURRETS.filter((x) => x.alive)[i];
+      if (!t) return null;
+      G.s = t.s - back; G.lat = clamp(t.lat * 0.55, -riverHalf(G.s) * 0.7, riverHalf(G.s) * 0.7); G.vLat = 0; camInit = false;
+      return { s: +t.s.toFixed(0), lat: +t.lat.toFixed(1), y: +t.y.toFixed(1) };
+    },
     post, scene,
-    turrets: () => TURRETS.map((t) => ({ s: +t.s.toFixed(0), alive: t.alive })),
+    turrets: () => TURRETS.map((t) => ({ s: +t.s.toFixed(0), lat: +t.lat.toFixed(1), y: +t.y.toFixed(1), alive: t.alive })),
     shipCam: () => ({ ship: shipPos.toArray(), cam: camera.position.toArray() }),
   },
 };

@@ -15,7 +15,7 @@
   html,body{width:100%;height:100%;overflow:hidden;background:#1b0f0b;color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-weight:400;
     -webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none;-webkit-tap-highlight-color:transparent}
-  canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
+  canvas{display:block;position:fixed;inset:0;width:100%;height:100%;outline:none}
   .ov{position:fixed;inset:0;pointer-events:none}
   #tintUnder{background:radial-gradient(ellipse at 50% 35%,rgba(40,170,160,.06) 20%,rgba(0,40,48,.5) 100%);opacity:0;transition:opacity .35s}
   #tintRad{background:radial-gradient(ellipse at center,rgba(255,30,0,.08) 20%,rgba(190,10,0,.34) 65%,rgba(120,0,0,.7) 100%);opacity:0}
@@ -120,6 +120,62 @@
   #btnTilt{right:calc(216px + var(--sr));bottom:calc(30px + var(--sb));width:auto;height:24px;border-radius:12px;padding:0 10px;font-size:9px;flex-direction:row;gap:5px}
   #btnTilt small{margin:0}
 
+
+  /* ---------- round 3: targeting markers, hit marker, key legend, engine selector, desktop buttons ---------- */
+  #reticle{transition:border-color .12s,width .12s,height .12s}
+  #reticle.lock{border-color:var(--amber);border-width:1.5px;box-shadow:0 0 6px rgba(255,170,90,.55)}
+  #reticle.lock::before,#reticle.lock::after{background:var(--amber)}
+  .tgt{position:absolute;left:0;top:0;width:32px;height:32px;display:none;opacity:.78;transition:opacity .2s}
+  .tgt::before,.tgt::after{content:"";position:absolute;inset:0;border:1px solid var(--amber);
+    clip-path:polygon(0 0,26% 0,26% 1.5px,1.5px 1.5px,1.5px 26%,0 26%,0 74%,1.5px 74%,1.5px calc(100% - 1.5px),26% calc(100% - 1.5px),26% 100%,0 100%)}
+  .tgt::after{transform:scaleX(-1)}
+  .tgt.aim{opacity:1}.tgt.aim::before,.tgt.aim::after{border-width:1.5px;filter:drop-shadow(0 0 3px rgba(255,160,70,.9))}
+  .tgt span,.mtag span{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:3px;font-size:8.5px;letter-spacing:.18em;font-weight:500;white-space:nowrap;color:var(--amber)}
+  .mtag{position:absolute;left:0;top:0;width:0;height:0;display:none}
+  .mtag::before{content:"";position:absolute;left:-9px;top:-9px;width:16px;height:16px;border:1px solid var(--cyan);border-radius:50%;box-shadow:0 0 6px rgba(127,230,255,.6)}
+  .mtag::after{content:"";position:absolute;left:-1px;top:-6px;width:1.5px;height:10px;background:var(--cyan);transform:rotate(45deg);box-shadow:0 0 0 0}
+  .mtag span{color:var(--cyan);top:-9px;left:14px;transform:none;margin:0;padding:2px 6px;border:1px solid rgba(127,230,255,.45);background:rgba(4,22,28,.45)}
+  #hitx{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;opacity:0;pointer-events:none}
+  #hitx::before,#hitx::after{content:"";position:absolute;left:50%;top:50%;width:26px;height:2px;margin:-1px 0 0 -13px;background:#fff;box-shadow:0 0 5px var(--amber);
+    clip-path:polygon(0 0,34% 0,34% 100%,0 100%,0 0,66% 0,100% 0,100% 100%,66% 100%,66% 0)}
+  #hitx::before{transform:rotate(45deg)}#hitx::after{transform:rotate(-45deg)}
+  #hitx.on{animation:hitx .32s ease-out}
+  #hitx.kill::before,#hitx.kill::after{background:var(--amber)}
+  @keyframes hitx{0%{opacity:1;scale:1.5}35%{opacity:1;scale:1}100%{opacity:0;scale:.9}}
+  #keys{position:absolute;left:calc(16px + var(--sl));bottom:calc(14px + var(--sb));font-size:9px;letter-spacing:.12em;line-height:1.85;color:var(--dim);
+    padding:7px 11px 7px 10px;border-left:1px solid var(--line);background:linear-gradient(90deg,rgba(20,10,8,.42),rgba(20,10,8,0));opacity:0;transition:opacity 1.2s ease}
+  #keys.on{opacity:1;transition:opacity .3s}
+  #keys kbd,.legend kbd{font:inherit;font-weight:600;color:var(--ink);border:1px solid rgba(255,236,214,.3);border-radius:3px;padding:0 4px;margin-right:2px;font-size:.92em}
+  .touch #keys{display:none}
+  #engBtn{position:absolute;top:calc(6px + var(--st));left:calc(50% - min(17vw,190px) - 80px);width:30px;height:24px;pointer-events:auto;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;color:var(--dim);border:1px solid var(--line);border-radius:12px;background:rgba(20,10,8,.25)}
+  #engBtn svg{width:14px;height:14px}
+  .eng{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .eng .engL{font-size:8.5px;letter-spacing:.26em;color:var(--dim);font-weight:500}
+  .eng .engL i{font-style:normal;opacity:.6}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;pointer-events:auto}
+  .seg button{font:inherit;font-size:9.5px;letter-spacing:.12em;color:var(--dim);background:rgba(20,10,8,.3);border:0;border-right:1px solid var(--line);padding:5px 10px 4px;cursor:pointer;text-align:left;line-height:1.25}
+  .seg button:last-child{border-right:0}
+  .seg button small{display:block;font-size:7.5px;opacity:.6;letter-spacing:.1em}
+  .seg button.on{color:#1d1410;background:#ece6d8}
+  .seg button:hover:not(.on){color:var(--ink)}
+  .legend{display:grid;grid-template-columns:auto auto;gap:3px 22px;font-size:10px;letter-spacing:.04em;color:var(--dim);margin-top:12px;width:max-content;max-width:100%}
+  .legend span{white-space:nowrap}
+  .touch .legend{display:none}
+  .instr .tg{color:var(--amber)} .instr .cy{color:var(--cyan)}
+  /* desktop: action buttons are clickable pills with key labels (stick + tilt stay touch-only) */
+  body:not(.touch).playing #touch{display:block}
+  body:not(.touch) #stickZone,body:not(.touch) #stickBase,body:not(.touch) #btnTilt{display:none}
+  .tbtn em{display:none;font-style:normal}
+  body:not(.touch) .tbtn{border-radius:5px;width:94px;height:30px;flex-direction:row;gap:6px;font-size:9.5px;letter-spacing:.16em;cursor:pointer;background:rgba(30,16,10,.34)}
+  body:not(.touch) .tbtn small{display:none}
+  body:not(.touch) .tbtn em{display:inline;opacity:.65;font-weight:400;letter-spacing:.06em}
+  body:not(.touch) .tbtn:hover{background:rgba(255,170,90,.18)}
+  body:not(.touch) #btnFire{right:calc(16px + var(--sr));bottom:calc(24px + var(--sb));width:94px;height:30px}
+  body:not(.touch) #btnRocket{right:calc(16px + var(--sr));bottom:calc(60px + var(--sb));width:94px;height:30px;font-size:9.5px}
+  body:not(.touch) #btnDive{right:calc(118px + var(--sr));bottom:calc(24px + var(--sb));width:94px;height:30px}
+  body:not(.touch) #btnBoost{right:calc(118px + var(--sr));bottom:calc(60px + var(--sb));width:94px;height:30px}
+
   /* ---------- screens ---------- */
   .screen{position:fixed;inset:0;z-index:10;transition:opacity .7s ease,visibility .7s;opacity:1;visibility:visible}
   .screen.hide{opacity:0;visibility:hidden;pointer-events:none}
@@ -165,6 +221,7 @@
     .intro h2{font-size:28px;margin:4px 0 2px} .intro p{font-size:11.5px;line-height:1.5}
     .facts{margin:9px 0 11px;gap:14px;font-size:8px} .primary{padding:12px 18px}
     .instr{font-size:9px;line-height:1.6;margin-top:9px} .hint{font-size:9px;margin-top:6px}
+    .eng{margin-top:7px} .seg button{padding:3px 8px 2px} .legend{margin-top:8px;font-size:9px;gap:1px 18px}
     .edition{bottom:calc(16px + var(--sb))}
     #stats{margin:12px 0 14px;gap:8px 26px} #stats b{font-size:19px}
   }
@@ -179,8 +236,10 @@
 <div id="tintLock" class="ov"></div>
 
 <div id="hud">
-  <div id="reticle"></div>
+  <div id="tgts"></div>
   <div id="brackets"></div>
+  <div id="reticle"></div>
+  <div id="hitx"></div>
   <div id="pL">
     <div class="row" id="rCargoRow"><div class="lbl"><span>CARGO <i>/ ГРУЗ</i></span><b id="tCargo">100%</b></div><div class="bar" id="bCargo"><div class="ghost"></div><div class="v"></div></div></div>
     <div class="row" id="rShieldRow"><div class="lbl"><span>SHIELD <i>/ ЩИТ</i></span><b id="tShield">100%</b></div><div class="bar" id="bShield"><div class="ghost"></div><div class="v"></div></div></div>
@@ -201,16 +260,18 @@
   <div id="pop"></div>
   <div id="toast"></div>
   <div id="qual"></div>
+  <div id="keys"><kbd>WASD</kbd>steer · <kbd>Space</kbd>/<kbd>LMB</kbd> fire · <kbd>R</kbd>/<kbd>RMB</kbd> rocket<br><kbd>Shift</kbd>boost · <kbd>E</kbd><kbd>C</kbd><kbd>Q</kbd>dive · <kbd>M</kbd>mute · <kbd>V</kbd>engine · <kbd>H</kbd>hide</div>
+  <div id="engBtn" title="Engine sound (V) / Звук двигателя"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></svg></div>
   <div id="snd" title="Sound (M) / Звук"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" stroke="none"/><path class="w1" d="M16 9.5a3.5 3.5 0 0 1 0 5"/><path class="w2" d="M18.5 7a7 7 0 0 1 0 10"/><path class="x" d="M16 9l5 6M21 9l-5 6" style="display:none"/></svg></div>
 </div>
 
 <div id="touch">
   <div id="stickZone"></div>
   <div id="stickBase"><div id="stickKnob"></div></div>
-  <div class="tbtn" id="btnFire">FIRE<small>ОГОНЬ</small></div>
-  <div class="tbtn" id="btnDive">DIVE<small>НЫРОК</small></div>
-  <div class="tbtn" id="btnBoost">BOOST<small>ФОРСАЖ</small></div>
-  <div class="tbtn" id="btnRocket">ROCKET<small>РАКЕТА</small></div>
+  <div class="tbtn" id="btnFire" title="Fire / Огонь">FIRE<small>ОГОНЬ</small><em>[Space]</em></div>
+  <div class="tbtn" id="btnDive" title="Dive / Нырок">DIVE<small>НЫРОК</small><em>[E]</em></div>
+  <div class="tbtn" id="btnBoost" title="Boost / Форсаж">BOOST<small>ФОРСАЖ</small><em>[Shift]</em></div>
+  <div class="tbtn" id="btnRocket" title="Rocket / Ракета">ROCKET<small>РАКЕТА</small><em>[R]</em></div>
   <div class="tbtn" id="btnTilt">TILT <small>НАКЛОН</small></div>
 </div>
 
@@ -224,13 +285,18 @@
       <div class="flight">FLIGHT 01 · РЕЙС 01</div>
       <h2>Delivery.</h2>
       <p>Two suns. One river. A settlement running dry.<br>Bring the water home. <span style="opacity:.6">/ Доставьте воду в посёлок Б.</span></p>
-      <div class="facts"><span>8.0 KM <i>MELAS CANYON</i></span><span>600 L <i>FRESH WATER</i></span><span>≈ 2:30 <i>FLIGHT</i></span></div>
+      <div class="facts"><span>8.0 KM <i>MELAS CANYON</i></span><span>600 L <i>FRESH WATER</i></span><span>≈ 2:36 <i>FLIGHT</i></span></div>
       <button class="primary" id="startBtn"><span>BEGIN DELIVERY<small>НАЧАТЬ РЕЙС</small></span><span>↗</span></button>
-      <div class="instr">
-        <span class="donly"><b>WASD</b> / arrows steer · <b>Shift</b> boost · <b>Space</b> / click fire · <b>R</b> / right-click rocket · <b>E</b> / <b>C</b> / <b>Ctrl</b> dive · <b>M</b> sound<br></span>
-        <span class="tonly"><b>Left thumb</b> stick · <b>FIRE</b> / <b>BOOST</b> hold · <b>ROCKET</b> / <b>DIVE</b> tap · <b>TILT</b> gyro<br></span>
-        Shoot drones &amp; beacons — <b>spare the cyan field masts</b>: no field, radiation. Water shields you.
+      <div class="legend">
+        <span><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> steer · climb</span><span><kbd>Shift</kbd> boost</span>
+        <span><kbd>Space</kbd> / <kbd>LMB</kbd> fire cannons</span><span><kbd>E</kbd> <kbd>C</kbd> <kbd>Q</kbd> dive / surface</span>
+        <span><kbd>R</kbd> / <kbd>RMB</kbd> rocket</span><span><kbd>M</kbd> mute · <kbd>V</kbd> engine · <kbd>H</kbd> keys</span>
       </div>
+      <div class="instr">
+        <span class="tonly"><b>Left thumb</b> stick · <b>FIRE</b> / <b>BOOST</b> hold · <b>ROCKET</b> / <b>DIVE</b> tap · <b>TILT</b> gyro · ⚙ engine<br></span>
+        <span class="tg">Amber brackets</span> = targets (drones, beacons, rim turrets). <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water shields you.
+      </div>
+      <div class="eng" id="engSel"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div></div>
       <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i></div>
     </div>
   </div>
