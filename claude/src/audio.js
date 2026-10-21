@@ -252,7 +252,7 @@ export class Audio {
     // node -> [pan] -> world/ui (+ sends)
     const c = this.ctx;
     let out = node;
-    if (o.pan && c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = o.pan; out.connect(p); out = p; }
+    if (o.pan && c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, o.pan)); out.connect(p); out = p; }
     out.connect(o.ui ? this.ui : this.world);
     if (o.verb) { const g = c.createGain(); g.gain.value = o.verb; out.connect(g); g.connect(this.verbIn); }
     if (o.echo) { const g = c.createGain(); g.gain.value = o.echo; out.connect(g); g.connect(this.echoIn); }
