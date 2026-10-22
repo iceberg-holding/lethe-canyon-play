@@ -24,6 +24,17 @@ import { Post, QualityGovernor, TIERS } from './post.js';
 THREE.ColorManagement.enabled = false;
 const params = new URLSearchParams(location.search);
 const AUTOPILOT = params.get('autopilot') === '1';
+// round 11 tips: 'lethe.tips' = '0' turns hints off; 'lethe.tips.boat' = '1' once the boat tutorial was seen
+const TIPS_KEY = 'lethe.tips', TUT_KEY = 'lethe.tips.boat';
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+const tipsParam = params.get('tips');   // ?tips=0 / ?tips=1 override for this page load only (tests)
+let tipsOn = tipsParam !== null ? tipsParam !== '0' : lsGet(TIPS_KEY) !== '0';
+if (tipsParam === '1') lsSet(TUT_KEY, null);
+const tutArmed = () => tipsOn && lsGet(TUT_KEY) !== '1';
+const TUT_R = 400, TUT_SLOW = 0.3, TUT_EASE = 0.4, TUT_HOLD = 2.1, TUT_PROMPT = 4;
+const TUT = { phase: 'idle', t: 0, boat: null, hold: false, dist: 0, dived: false, outAt: 0, minScale: 1, count: 0, frozen: false, triggerAt: null, releaseAt: null, triggerS: null };
+let timeScale = 1;
 const NOBOOST = params.get('noboost') === '1';   // autopilot at cruise speed (timing tests)
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 document.body.classList.toggle('touch', isTouch);
@@ -240,6 +251,11 @@ scene.add(boatM.pF, boatM.pB, boatM.sF, boatM.sB, boatM.panels);
 for (const m of MINES) { m.wp = new THREE.Vector3(0, -1e4, 0); m.anchor = new THREE.Vector3(); }
 for (const h of HUNTERS) { h.wp = new THREE.Vector3(0, -1e4, 0); h.nose = new THREE.Vector3(); h.fwd = new THREE.Vector3(0, 0, -1); }
 for (const b of BOATS) { b.wp = new THREE.Vector3(0, -1e4, 0); b.deck = new THREE.Vector3(0, -1e4, 0); b.gun = new THREE.Vector3(); b.M = new THREE.Matrix4(); }
+// round 11: the first two boats of the run (by position along the river) are gentler: slower, longer gun cooldown
+for (const [k, b] of BOATS.slice(0, N_BOAT_REAL).sort((a, c) => a.home - c.home).entries()) b.easy = k < 2;
+const EASY_PACE = 0.65, TUTOR_PACE = 0.6, EASY_CD = 1.6;
+const boatPace = (b) => (b === TUT.boat ? TUTOR_PACE : b.easy ? EASY_PACE : 1);
+const boatCdMul = (b) => (b.easy ? EASY_CD : 1);
 const MINE_TRIG = 4.6, MINE_DMG = 34, MINE_PTS = 120, HUNTER_PTS = 180, BOAT_PTS = { patrol: 400, smuggler: 300 }, BOAT_HP = 6;
 const HUNT_SP = 44, HB_SPEED = 78, PB_SPEED = 125;
 const spouts = [];
@@ -321,7 +337,7 @@ const hud = {
   rowCargo: $('rCargoRow'), burnTag: $('burnTag'), rowShield: $('rShieldRow'), rowHealth: $('rHealthRow'),
   air: $('tAir'), airBox: $('airBox'), msg: $('msg'), pop: $('pop'), toast: $('toast'), markBox: $('markBox'), markLbl: document.querySelector('#markBox .lbl span'), mark: $('tMark'), sDown: $('sDown'),
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
-  dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'),
+  dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'), tut: $('tut'),
 };
 for (let i = 0; i < ROCKET_AMMO; i++) hud.pips.appendChild(document.createElement('i'));
 const zoneEls = ZONES.map((z) => {
@@ -1333,7 +1349,7 @@ function initNaval() {
     toWorld(h.ps, h.pl, h.py, h.wp);
   }
   for (const b of BOATS) {
-    b.heard = false; b.hp = BOAT_HP; b.head = b.dir > 0 ? 0 : Math.PI; b.sinkT = 0; b.cd = 2 + Math.random() * 2; b.fire = 'idle'; b.ft = 0; b.shots = 0; b.flashT = 0;
+    b.heard = false; b.hp = BOAT_HP; b.head = b.dir > 0 ? 0 : Math.PI; b.sinkT = 0; b.cd = (2 + Math.random() * 2) * boatCdMul(b); b.fire = 'idle'; b.ft = 0; b.shots = 0; b.flashT = 0;
     toWorld(b.s, b.lat, BOAT_KEEL - 0.05, b.wp); toWorld(b.s, b.lat, 2.4, b.deck);
     boatM.panels.setColorAt(BOATS.indexOf(b), BOAT_PANEL[b.type]);
   }
@@ -1637,7 +1653,7 @@ function updateNaval(dt, time) {
     if (b.alive) {
       // slow back-and-forth run around the home position (turning takes a few seconds)
       const turning = Math.abs((b.dir > 0 ? 0 : Math.PI) - b.head) > 0.3;
-      b.s += Math.cos(b.head) * b.speed * dt * (turning ? 0.35 : 1);
+      b.s += Math.cos(b.head) * b.speed * boatPace(b) * dt * (turning ? 0.35 : 1);
       if ((b.s - b.home) * b.dir > 150) b.dir = -b.dir;
       b.head += ((b.dir > 0 ? 0 : Math.PI) - b.head) * damp(0.7, dt);
       b.lat = b.lat0 + Math.sin(time * 0.11 + i * 2) * 2.2 + Math.sin(b.head) * 3;
@@ -1725,7 +1741,7 @@ function updateNaval(dt, time) {
     const dS = b.gun.distanceTo(shipPos);
     if (b.fire === 'idle') {
       b.cd -= dt;
-      if (b.cd <= 0 && !G.underwater && dS < 335 && dS > 12 && viewLOS(b.gun, shipPos, b.s)) { b.fire = 'tele'; b.ft = 0.8; b.teleAt = G.t; audio.boatAlarm(panOf(b.gun)); }
+      if (b.cd <= 0 && !(b === TUT.boat && TUT.hold) && !G.underwater && dS < 335 && dS > 12 && viewLOS(b.gun, shipPos, b.s)) { b.fire = 'tele'; b.ft = 0.8; b.teleAt = G.t; audio.boatAlarm(panOf(b.gun)); }
     } else {
       threat(b, b.deck);
       glows.add(b.gun.x, b.gun.y, b.gun.z, 1.2, 1.6, 2.6, 0.6 + 0.4 * Math.sin(time * 40), b.fire === 'tele' ? 3.5 : 2.5);
@@ -1738,12 +1754,12 @@ function updateNaval(dt, time) {
         V4.x += (Math.random() - 0.5) * 5; V4.y += (Math.random() - 0.5) * 3; V4.z += (Math.random() - 0.5) * 5;
         enemyBolt(b.gun, V4, b.s, PB_SPEED, EB_BLUE, 6, 3.0, 'boat');
         G.boatShots++;
-        boatShotLog.push({t:G.t,teleAt:b.teleAt,range:dS}); if(boatShotLog.length>200)boatShotLog.shift();
+        boatShotLog.push({t:G.t,teleAt:b.teleAt,range:dS,i}); if(boatShotLog.length>200)boatShotLog.shift();
         sparks.emit(b.gun.x, b.gun.y, b.gun.z, 0, 0, 0, 0.1, 4, 2, 1.2, 1.6, 2.6, 1);
         lightFlash(b.gun, 110, 0.12, 0.7, 0.85, 1);
         audio.turretShot(panOf(b.gun) * 0.8);
         b.ft = 0.2;
-        if (++b.shots >= 3) { b.fire = 'idle'; b.cd = 3.2 + Math.random() * 1.6; }
+        if (++b.shots >= 3) { b.fire = 'idle'; b.cd = (3.2 + Math.random() * 1.6) * boatCdMul(b); }
       }
     }
   }
@@ -2458,7 +2474,7 @@ function updateHUD(dt, time) {
   const rdt = realDt;
   if (G.msgT > 0) { G.msgT -= rdt; if (G.msgT <= 0) hud.msg.style.opacity = 0; }
   if (G.toastT > 0) {
-    G.toastT -= rdt;
+    if (TUT.phase !== 'active') G.toastT -= rdt;   // round 11: a toast under the tutorial prompt waits (hidden) until it ends
     if (G.toastT <= 0) { hud.toast.classList.remove('on'); G.toastT = -0.5; }   // short gap before a queued one
   } else if (G.toastT < 0) {
     G.toastT = Math.min(0, G.toastT + rdt);
@@ -2525,6 +2541,7 @@ function showResult() {
 }
 
 function reset() {
+  endTutorial(); TUT.phase = 'idle'; TUT.boat = null;
   resetLevel();
   for (let i = N_DRONE_REAL; i < DRONES.length; i++) DRONES[i].alive = false;
   for (let i = N_MINE_REAL; i < MINES.length; i++) MINES[i].alive = false;
@@ -2603,6 +2620,19 @@ function cycleEngine() {
   if (G.phase === 'start' || G.phase === 'result') audio.preview();
 }
 syncEngine();
+// round 11: Tips / Подсказки toggle (start-screen settings block, next to the engine sound); turning it on re-arms the boat tutorial
+const tipsSeg = document.querySelector('#tipsSel .seg');
+function syncTips() { for (const b of tipsSeg.children) b.classList.toggle('on', (b.dataset.v === '1') === tipsOn); }
+function setTips(on) {
+  tipsOn = on; lsSet(TIPS_KEY, on ? '1' : '0');
+  if (on) { lsSet(TUT_KEY, null); if (TUT.phase === 'done') TUT.phase = 'idle'; }
+  syncTips();
+}
+for (const b of tipsSeg.children) {
+  b.addEventListener('click', (ev) => { ev.stopPropagation(); audio.init(); audio.click(); setTips(b.dataset.v === '1'); b.blur(); });
+  b.addEventListener('keydown', (ev) => ev.stopPropagation());
+}
+syncTips();
 hud.engBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); cycleEngine(); });
 // leaving mid-flight (e.g. Ctrl+W while Ctrl is the dive key) asks first
 addEventListener('beforeunload', (e) => {
@@ -2660,6 +2690,59 @@ function updateAudioScene() {
   } else audio.droneVoice(0, 0, 1);
 }
 
+// ------------------------------------------------------------------ round 11: first-boat tutorial
+// The first time an alive boat ahead comes within ~400 m (tips on, not yet seen): ~0.3x slow-mo with 0.4 s eases,
+// a muffled / pitched-down mix with a voice-like sting, and a big "dive" prompt (pulsing DIVE button on touch).
+// That boat holds fire until the player dives or the prompt times out. ?tips=0 disables it (tests), ?tips=1 re-arms it.
+function updateTutorial(rdt) {
+  const T = TUT;
+  if (T.phase === 'idle') {
+    if (G.phase === 'flight' && !G.dive && !G.underwater && tutArmed()) {
+      let best = null, bd = TUT_R;
+      for (const b of BOATS) {
+        if (!b.alive || b.debug || b.s < G.s) continue;
+        const d = b.deck.distanceTo(shipPos);
+        if (d < bd) { bd = d; best = b; }
+      }
+      if (best) startTutorial(best, bd);
+    }
+    return;
+  }
+  if (T.phase !== 'active') return;
+  if (G.phase !== 'flight') { endTutorial(); return; }
+  if (!frozen && !T.frozen) T.t += rdt;
+  if (!T.dived && (G.dive || G.underwater)) {
+    T.dived = true;
+    T.outAt = Math.min(T.outAt, Math.max(T.t, TUT_EASE));   // diving ends the slow-mo early
+    if (T.boat) audio.beep(1320);
+  }
+  const depth = smoothstep(0, TUT_EASE, T.t) * (1 - smoothstep(T.outAt, T.outAt + TUT_EASE, T.t));
+  timeScale = 1 - (1 - TUT_SLOW) * depth;
+  T.minScale = Math.min(T.minScale, timeScale);
+  audio.slowmo(depth);
+  if (T.hold && (T.dived || T.t >= TUT_PROMPT)) { T.hold = false; T.releaseAt = G.t; }
+  const promptOn = !T.dived && T.t < TUT_PROMPT;
+  if (!promptOn && hud.tut.classList.contains('on')) { hud.tut.classList.remove('on'); hud.dive.classList.remove('pulse'); }
+  if (!promptOn && T.t > T.outAt + TUT_EASE) endTutorial();
+}
+function startTutorial(b, d) {
+  Object.assign(TUT, { phase: 'active', t: 0, boat: b, hold: true, dist: d, dived: false, outAt: TUT_EASE + TUT_HOLD, minScale: 1,
+    count: TUT.count + 1, triggerAt: G.t, releaseAt: null, triggerS: G.s });
+  G.boatHinted = true;   // the prompt replaces the round-10 boat toast
+  lsSet(TUT_KEY, '1');
+  audio.tutorialSting();
+  hud.tut.classList.add('on');
+  hud.dive.classList.add('pulse');
+  document.body.classList.add('tutorial');
+}
+function endTutorial() {
+  if (TUT.hold) { TUT.hold = false; TUT.releaseAt = G.t; }
+  TUT.phase = TUT.phase === 'idle' ? 'idle' : 'done';
+  timeScale = 1; audio.slowmo(0);
+  hud.tut.classList.remove('on'); hud.dive.classList.remove('pulse');
+  document.body.classList.remove('tutorial');
+}
+
 // ------------------------------------------------------------------ main loop
 const clock = new THREE.Clock();
 let pxScale = 600;
@@ -2675,6 +2758,9 @@ function loop() {
   governor.frame(rawDt);
   if (portraitMQ.matches && G.phase !== 'start' && G.phase !== 'result') dt = 0;
   if (frozen) dt = 0;   // debug: freeze the simulation (cinematic shots)
+  // round 11: tutorial slow-mo = one global time scale on the shared dt (1 outside the tutorial)
+  updateTutorial(realDt);
+  dt *= timeScale;
   time += dt;
   simTime = time;
   G.armorT -= realDt;
@@ -2802,6 +2888,10 @@ window.__lethe = {
     shield: +G.shield.toFixed(1), mark: +G.mark.toFixed(3), spotters: G.spotters, lock: G.lock.phase,
     turretShotsFired: G.turretShotsFired, ebLog: G.ebLog.slice(-6), rkLog: G.rkLog.slice(-4), turretHits: G.turretHits, quality, fps: Math.round(fps),
     camDist: +camera.position.distanceTo(shipPos).toFixed(2), shipFrac: shipFrac(), camWallGap: camGap(), drawCalls: renderer.info.render.calls, shipModel: ship.shipModel, triangles: renderer.info.render.triangles,
+    tutorial: { phase: TUT.phase, timeScale: +timeScale.toFixed(3), minScale: +TUT.minScale.toFixed(3), t: +TUT.t.toFixed(2), prompt: hud.tut.classList.contains('on'),
+      divePulse: hud.dive.classList.contains('pulse'), hold: TUT.hold, dived: TUT.dived, dist: +TUT.dist.toFixed(1), count: TUT.count, boat: BOATS.indexOf(TUT.boat),
+      triggerAt: TUT.triggerAt, releaseAt: TUT.releaseAt, triggerS: TUT.triggerS, tips: tipsOn, seen: lsGet(TUT_KEY) === '1', armed: tutArmed() },
+    timeScale: +timeScale.toFixed(3),
   }),
   start: startGame,
   retry: () => { reset(); startGame(); },
@@ -2841,7 +2931,7 @@ window.__lethe = {
     spawnBoat: (ahead = 80, lat = null, type = 'patrol', speed = 0) => {
       const b = BOATS.find((x) => x.debug && !x.alive) || BOATS[BOATS.length - 1];
       const l = lat === null ? G.lat : lat;
-      Object.assign(b, { s: G.s + ahead, home: G.s + ahead, lat: l, lat0: l, type, dir: 1, dir0: 1, speed, alive: true, hp: BOAT_HP, head: 0, sinkT: 0, cd: 1, fire: 'idle' });
+      Object.assign(b, { s: G.s + ahead, home: G.s + ahead, lat: l, lat0: l, type, dir: 1, dir0: 1, speed, alive: true, hp: BOAT_HP, head: 0, sinkT: 0, cd: 1, fire: 'idle', easy: false });
       toWorld(b.s, b.lat, BOAT_KEEL - 0.05, b.wp); toWorld(b.s, b.lat, 2.4, b.deck);
       boatM.panels.setColorAt(BOATS.indexOf(b), BOAT_PANEL[type]); boatM.panels.instanceColor.needsUpdate = true;
       return BOATS.indexOf(b);
@@ -2849,6 +2939,17 @@ window.__lethe = {
     boatSignals: () => BOATS.filter(b=>b.alive&&b.lightEnd>b.lightStart).map(b=>({type:b.type,lights:Array.from({length:b.lightEnd-b.lightStart},(_,j)=>({rgb:Array.from(glows.col.slice((b.lightStart+j)*4,(b.lightStart+j)*4+3)),size:glows.size[b.lightStart+j]}))})),
     boatShotLog: () => boatShotLog,
     boatHinted: () => G.boatHinted,
+    // round 11 tutorial: trigger on boat i (default: nearest alive boat ahead, debug boats included), freeze its clock, re-arm
+    tutorial: (i = null) => {
+      let b = i === null ? null : BOATS[i];
+      if (!b) { let bd = 1e9; for (const x of BOATS) if (x.alive && x.s > G.s && x.deck.distanceTo(shipPos) < bd) { bd = x.deck.distanceTo(shipPos); b = x; } }
+      if (!b) return -1;
+      endTutorial(); startTutorial(b, b.deck.distanceTo(shipPos)); return BOATS.indexOf(b);
+    },
+    tutorialFreeze: (on = true) => { TUT.frozen = !!on; },
+    tutorialReset: () => { endTutorial(); TUT.phase = 'idle'; TUT.boat = null; },
+    setTips: (on) => { setTips(!!on); return { tips: tipsOn, armed: tutArmed() }; },
+    boatEase: () => BOATS.slice(0, N_BOAT_REAL).map((b) => ({ home: b.home, type: b.type, pace: boatPace(b), cdMul: boatCdMul(b), s: +b.s.toFixed(2) })),
     ricochetBoat: () => { const b=BOATS.find(b=>b.alive&&Math.abs(b.s-G.s)<400); if(b)ricochet(b,b.deck,shipFwd); },
     naval: () => ({
       mines: MINES.map((m) => ({ s: +m.s.toFixed(0), lat: +m.lat.toFixed(1), y: +m.y.toFixed(1), alive: m.alive })),

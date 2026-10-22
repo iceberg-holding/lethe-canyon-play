@@ -23,6 +23,8 @@ export class Audio {
     try { const e = localStorage.getItem(LS_ENGINE); if (ENGINE_ALIASES[e]) this.engine = ENGINE_ALIASES[e]; } catch (e) { /* ignore */ }
     this.gun = 0;
     this.listeners = [];
+    // round 11 tutorial slow-mo: 0..1 depth -> pitch drop on every voice + a master low-pass
+    this.slowK = 0; this.pitch = 1; this.loops = [];
   }
   init() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
@@ -154,7 +156,8 @@ export class Audio {
     const fl = c.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q;
     const g = c.createGain(); g.gain.value = 0;
     src.connect(fl); fl.connect(g); g.connect(dest || this.world); src.start(0, Math.random() * 1.9);
-    return { g, fl };
+    this.loops.push(src);
+    return { g, fl, src };
   }
   // ---------------------------------------------------------------- volume
   setVolume(v) { this.vol = Math.min(1, Math.max(0, v)); this.applyVol(); }
@@ -179,7 +182,7 @@ export class Audio {
     this.set(this.rush.fl.frequency, 400 + sp * 900);
     this.set(this.spray.g.gain, on * skim * 0.12);
     this.set(this.bubble.g.gain, on * (underwater ? 0.16 : 0));
-    this.set(this.lp.frequency, underwater ? 600 : 18000, 0.12);
+    this.set(this.lp.frequency, Math.min(underwater ? 600 : 18000, 18000 * Math.pow(0.05, this.slowK)), 0.12);
     this.set(this.verbIn.gain, underwater ? 0.15 : 0.55);
     this.set(this.echoIn.gain, underwater ? 0 : 0.35);
     this.lastProx = prox;
@@ -216,18 +219,18 @@ export class Audio {
     this.set(W.air.fl.frequency, 1300 + sp * 1500 + boost * 900 + swell * 700);
     this.set(W.hiss.g.gain, 0.012 + 0.014 * sp + boost * 0.012);
     this.set(W.wg.gain, 0.0045 + 0.004 * sp + boost * 0.003);
-    const wf = 2100 + sp * 900 + boost * 400 + swell * 150;
+    const wf = (2100 + sp * 900 + boost * 400 + swell * 150) * this.pitch;
     this.set(W.w1.frequency, wf); this.set(W.w2.frequency, wf * 1.005);
     // turbine
     this.set(T.g.gain, sel('turbine'), 0.12);
-    const tf = 430 + sp * 620 + boost * 260 + swell * 60;
+    const tf = (430 + sp * 620 + boost * 260 + swell * 60) * this.pitch;
     this.set(T.f1.frequency, tf, 0.25); this.set(T.f3.frequency, tf * 1.005, 0.25); this.set(T.f2.frequency, tf * 2.006, 0.25);
     this.set(T.bp.frequency, tf * 1.6);
         this.set(T.blades.g.gain, 0.012 + 0.016 * sp + boost * 0.016);
     this.set(T.blades.fl.frequency, tf * 4);
     // ion hum: an open fifth that lifts gently with speed; shimmer brightens with boost
     this.set(I.g.gain, sel('ion'), 0.12);
-    const hf = 205 + sp * 40 + boost * 18;
+    const hf = (205 + sp * 40 + boost * 18) * this.pitch;
     this.set(I.h1.frequency, hf, 0.3); this.set(I.h4.frequency, hf * 1.006, 0.3); this.set(I.h2.frequency, hf * 1.5, 0.3); this.set(I.h3.frequency, hf * 2.003, 0.3);
     this.set(I.lp.frequency, 700 + sp * 700 + boost * 500);
     this.set(I.sg.gain, 0.012 + 0.012 * sp + boost * 0.02 + swell * 0.01);
@@ -248,6 +251,7 @@ export class Audio {
   droneVoice(gain, pan, ratio) {
     if (!this.ctx) return;
     this.set(this.whineG.gain, gain * 0.05, 0.1);
+    ratio *= this.pitch;
     this.set(this.whine.frequency, 430 * ratio, 0.1); this.set(this.whine2.frequency, 437 * ratio, 0.1);
     if (this.whinePan) this.set(this.whinePan.pan, Math.max(-1, Math.min(1, pan)), 0.1);
   }
@@ -268,9 +272,10 @@ export class Audio {
   }
   noiseHit(type, f, q, peak, dec, fEnd, o = {}) {
     if (!this.ctx) return;
-    const c = this.ctx, t = c.currentTime + (o.delay || 0), src = c.createBufferSource();
+    const c = this.ctx, t = c.currentTime + (o.delay || 0), src = c.createBufferSource(), pk = o.raw ? 1 : this.pitch;
     src.buffer = this.noise;
-    if (o.rate) src.playbackRate.value = o.rate;
+    f *= pk; fEnd *= pk;
+    if (o.rate || pk !== 1) src.playbackRate.value = (o.rate || 1) * pk;
     const fl = c.createBiquadFilter(); fl.type = type; fl.frequency.setValueAtTime(f, t); fl.Q.value = q;
     if (fEnd) fl.frequency.exponentialRampToValueAtTime(fEnd, t + dec);
     const g = c.createGain();
@@ -283,6 +288,7 @@ export class Audio {
   tone(type, f0, f1, peak, dec, delay = 0, o = {}) {
     if (!this.ctx) return;
     const c = this.ctx, t = c.currentTime + delay, osc = c.createOscillator(), g = c.createGain();
+    if (!o.raw) { f0 *= this.pitch; f1 *= this.pitch; }
     osc.type = type; osc.frequency.setValueAtTime(f0, t); osc.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + dec);
     osc.connect(g);
     this.route(g, o);
@@ -386,5 +392,37 @@ export class Audio {
   // patrol boat about to fire: two short horn blips
   boatApproach(pan = 0) { this.tone('sawtooth', 72, 65, 0.045, 1.3, 0, {pan, attack:0.15, verb:0.25}); this.tone('triangle', 180, 155, 0.08, 0.7, 0.15, {pan, attack:0.08, verb:0.4}); }
   boatAlarm(pan = 0) { if (this.ctx) for (let i = 0; i < 2; i++) this.tone('square', 540, 520, 0.035, 0.12, i * 0.16, { pan, attack: 0.004 }); }
+  // round 11 tutorial slow-mo depth 0..1: everything drops up to ~a fourth and loses its top end (the sting is exempt)
+  slowmo(k) {
+    if (!this.ctx || Math.abs(k - this.slowK) < 1e-3) return;
+    this.slowK = k; this.pitch = 1 - 0.3 * k;
+    for (const s of this.loops) s.playbackRate.setTargetAtTime(this.pitch, this.ctx.currentTime, 0.05);
+    this.set(this.lp.frequency, 18000 * Math.pow(0.05, k), 0.05);
+  }
+  // "Boat ahead!" sting: a radio-voice formant chirp ("wo-AH"), a two-tone horn under it and a rising whoosh.
+  // On the UI bus and exempt from the slow-mo pitch drop so it cuts through the muffled world.
+  tutorialSting() {
+    if (!this.ctx) return;
+    const c = this.ctx, t = c.currentTime, out = c.createGain(); out.gain.value = 1; out.connect(this.ui);
+    const vs = c.createGain(); vs.gain.value = 0.0001; vs.connect(out);
+    vs.gain.setValueAtTime(0.0001, t); vs.gain.exponentialRampToValueAtTime(0.5, t + 0.04);
+    vs.gain.setValueAtTime(0.5, t + 0.32); vs.gain.exponentialRampToValueAtTime(0.0001, t + 0.62);
+    // two glottal pulses through three gliding formants (/o/ -> /a/)
+    const src = c.createOscillator(), src2 = c.createOscillator(); src.type = src2.type = 'sawtooth';
+    src.frequency.setValueAtTime(150, t); src.frequency.linearRampToValueAtTime(205, t + 0.18); src.frequency.exponentialRampToValueAtTime(128, t + 0.6);
+    src2.frequency.setValueAtTime(151.5, t); src2.frequency.linearRampToValueAtTime(207, t + 0.18); src2.frequency.exponentialRampToValueAtTime(129, t + 0.6);
+    for (const [fa, fb, q, g] of [[480, 760, 9, 0.9], [850, 1250, 11, 0.55], [2400, 2600, 14, 0.22]]) {
+      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = q;
+      bp.frequency.setValueAtTime(fa, t); bp.frequency.linearRampToValueAtTime(fb, t + 0.2);
+      const gg = c.createGain(); gg.gain.value = g; src.connect(bp); src2.connect(bp); bp.connect(gg); gg.connect(vs);
+    }
+    src.start(t); src2.start(t); src.stop(t + 0.7); src2.stop(t + 0.7);
+    // two-tone horn (low, soft) after the chirp
+    this.tone('sawtooth', 233, 231, 0.05, 0.28, 0.12, { ui: true, raw: true, attack: 0.03 });
+    this.tone('sawtooth', 311, 309, 0.04, 0.28, 0.42, { ui: true, raw: true, attack: 0.03 });
+    // whoosh: band-passed noise sweeping up, then down into the slow-mo
+    this.noiseHit('bandpass', 280, 1.4, 0.32, 0.55, 2600, { ui: true, raw: true, attack: 0.3 });
+    this.noiseHit('lowpass', 2400, 0.7, 0.18, 0.9, 260, { ui: true, raw: true, attack: 0.05, delay: 0.5 });
+  }
   empty() { this.tone('square', 220, 200, 0.04, 0.06, 0, { ui: true }); }
 }

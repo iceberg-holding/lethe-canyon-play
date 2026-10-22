@@ -86,6 +86,40 @@
   #toast.on{opacity:1;transform:translate(-50%,0)}
   #toast i{font-style:normal;color:var(--dim)}
   #toast em{font-style:italic}
+  /* ---------- round 11: first-boat tutorial prompt + pulsing DIVE button ---------- */
+  #tut{position:absolute;left:50%;top:max(calc(84px + var(--st)),15%);transform:translate(-50%,6px) scale(.97);text-align:center;opacity:0;pointer-events:none;
+    transition:opacity .35s,transform .35s;padding:14px 30px 16px;background:radial-gradient(closest-side,rgba(12,6,4,.66),rgba(12,6,4,.45) 55%,rgba(12,6,4,0));white-space:nowrap}
+  #tut.on{opacity:1;transform:translate(-50%,0) scale(1)}
+  #tut .tl{font-size:clamp(24px,3.4vw,42px);font-weight:600;letter-spacing:.03em;color:#fff4e4;text-shadow:0 0 18px rgba(255,140,60,.55),0 2px 3px rgba(0,0,0,.7);line-height:1.1}
+  #tut .te{font-size:clamp(12px,1.5vw,18px);font-weight:500;letter-spacing:.28em;color:#ffc37e;margin-top:4px;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+  #tut .tr{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:8px}
+  #tut .tx{text-align:left;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  #tut .tk{font-size:13px;letter-spacing:.1em;color:#f6efe6}
+  #tut .tc{font-size:11px;letter-spacing:.08em;color:#bff8f0;margin-top:4px}
+  #tut .tc i{display:block;font-style:normal;color:rgba(191,248,240,.7);font-size:10px}
+  #tut .tk i{font-style:normal;color:var(--dim)}
+  #tut kbd{display:inline-block;font:inherit;font-weight:700;color:#1d1410;background:#ece6d8;border-radius:4px;padding:0 7px;margin:0 2px;box-shadow:0 2px 0 rgba(0,0,0,.45);animation:tutKey 1s ease-in-out infinite}
+  #tut .tt{display:none;color:#8ff4ea}
+  .touch #tut .tt{display:inline} .touch #tut .dk{display:none}
+  #tut svg{width:132px;height:44px;flex:none;overflow:visible}
+  #tut svg path{fill:none;stroke-linecap:round;stroke-linejoin:round}
+  #tut svg .w{stroke:rgba(120,230,255,.75);stroke-width:1.6;stroke-dasharray:6 4}
+  #tut svg .b{stroke:#ffe2c2;stroke-width:1.8;fill:rgba(255,205,160,.35)}
+  #tut svg .p{stroke:#8ff4ea;stroke-width:2.4;stroke-dasharray:5 4;animation:tutPath 1.1s linear infinite}
+  #tut svg .u,#tut svg .uh{stroke:#ffb15e;stroke-width:2.6;animation:tutUp .8s ease-in-out infinite}
+  @keyframes tutPath{to{stroke-dashoffset:-18}}
+  @keyframes tutUp{0%,100%{transform:translateY(2px);opacity:.6}50%{transform:translateY(-2px);opacity:1}}
+  @keyframes tutKey{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+  body.tutorial #toast{opacity:0}
+  @media (max-height:500px){ #tut{top:calc(56px + var(--st));padding:8px 22px 10px} #tut .tl{font-size:30px} #tut .te{font-size:12px;margin-top:2px}
+    #tut .tr{margin-top:4px;gap:10px} #tut svg{width:96px;height:32px} #tut .tk{font-size:12px} #tut .tc{margin-top:2px;font-size:10px} #tut .tc i{font-size:9px} }
+  #btnDive.pulse{border-color:#8ff4ea;border-width:2px;background:rgba(40,190,180,.45);animation:diveGlow .9s ease-in-out infinite}
+  #btnDive.pulse::after,#btnDive.pulse::before{content:"";position:absolute;inset:-4px;border-radius:inherit;border:2px solid rgba(140,255,240,.9);animation:diveRing 1.2s ease-out infinite;pointer-events:none}
+  #btnDive.pulse::before{animation-delay:.6s}
+  @keyframes diveRing{0%{transform:scale(.95);opacity:1}100%{transform:scale(1.75);opacity:0}}
+  body:not(.touch) #btnDive.pulse::after,body:not(.touch) #btnDive.pulse::before{animation-name:diveRingD}
+  @keyframes diveRingD{0%{transform:scale(1);opacity:1}100%{transform:scale(1.18,1.6);opacity:0}}
+  @keyframes diveGlow{0%,100%{box-shadow:0 0 10px rgba(120,255,235,.5)}50%{box-shadow:0 0 28px rgba(120,255,235,.95)}}
   #pop{position:absolute;left:50%;top:calc(max(calc(118px + var(--st)),21%) + 62px);transform:translate(-50%,-50%);font-size:13px;font-weight:500;letter-spacing:.2em;color:#ffd9a8;opacity:0;white-space:nowrap}
   #reticle{position:absolute;left:0;top:0;width:30px;height:30px;margin:-15px 0 0 -15px;border:1px solid rgba(255,230,190,.55);border-radius:50%}
   #reticle::before,#reticle::after{content:"";position:absolute;background:rgba(255,230,190,.85)}
@@ -187,6 +221,7 @@
     display:flex;align-items:center;justify-content:center;color:var(--dim);border:1px solid var(--line);border-radius:12px;background:rgba(20,10,8,.25)}
   #engBtn svg{width:14px;height:14px}
   .eng{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  #tipsSel{display:inline-flex;align-items:center;gap:10px;margin-left:8px}
   .eng .engL{font-size:8.5px;letter-spacing:.26em;color:var(--dim);font-weight:500}
   .eng .engL i{font-style:normal;opacity:.6}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;pointer-events:auto}
@@ -296,6 +331,22 @@
   <div id="msg"></div>
   <div id="pop"></div>
   <div id="toast"></div>
+  <div id="tut">
+    <div class="tl">Катер впереди — ныряй!</div>
+    <div class="te">BOAT AHEAD — DIVE!</div>
+    <div class="tr">
+      <svg viewBox="0 0 132 44" aria-hidden="true">
+        <path class="w" d="M2 17H130"/>
+        <path class="b" d="M70 17h40l-5 7H76zM80 17v-7h16l4 7"/>
+        <path class="p" d="M4 7C22 7 32 16 42 27S62 38 76 37"/>
+        <path class="u" d="M90 40V28"/><path class="uh" d="M85 32l5-6 5 6"/>
+      </svg>
+      <div class="tx">
+        <div class="tk"><span class="dk">Press <kbd>E</kbd> to dive <i>· жми <kbd>E</kbd></i></span><span class="tt">Tap <b>DIVE</b> ↘ <i>· жми НЫРОК</i></span></div>
+        <div class="tc">dive under ↓, shoot up ↑<i>нырни под него и бей снизу</i></div>
+      </div>
+    </div>
+  </div>
   <div id="qual"></div>
   <div id="keys"><kbd>WASD</kbd>steer · <kbd>Space</kbd>/<kbd>LMB</kbd> fire · <kbd>R</kbd>/<kbd>RMB</kbd> rocket<br><kbd>Shift</kbd>boost · <kbd>E</kbd><kbd>C</kbd><kbd>Q</kbd>dive · <kbd>M</kbd>mute · <kbd>V</kbd>engine · <kbd>H</kbd>hide</div>
   <div id="engBtn" title="Engine sound (V) / Звук двигателя"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></svg></div>
@@ -333,7 +384,8 @@
         <span class="tonly"><b>Left thumb</b> stick · <b>FIRE</b> / <b>BOOST</b> hold · <b>ROCKET</b> / <b>DIVE</b> tap · <b>TILT</b> gyro · ⚙ engine<br></span>
         <span class="tg">Amber brackets</span> = targets. Drones mark you, <b>relays</b> pass it to rim turrets — down a relay, the sector goes blind. <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water hides you — mines and hunters wait below.
       </div>
-      <div class="eng" id="engSel"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div></div>
+      <div class="eng" id="engSel"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div>
+        <span id="tipsSel"><span class="engL">TIPS <i>/ ПОДСКАЗКИ</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span></div>
       <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i></div>
     </div>
   </div>
