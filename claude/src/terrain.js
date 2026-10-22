@@ -75,15 +75,15 @@ function rockColor(s, y, side) {
     return _c;
   }
   const yy = y + 5 * noise1(s * 0.004 + side * 3.1);
-  const band = Math.floor(yy / 7);
+  const band = Math.floor(yy / 11);
   const c = STRATA[(hash2(band, 7) * STRATA.length) | 0];
-  const j = 0.9 + 0.12 * noise2(s * 0.05, y * 0.15);
+  const j = 0.91 + 0.16 * noise2(s * 0.018, y * 0.09);
   const ao = lerp(0.58, 1.04, smoothstep(2, 50, y));
   const wet = y < 3.2 ? 0.6 : 1;
   // greenish-grey tint of the half-terraformed lower banks
   const moss = y < 9 && y > 0.5 ? clamp(noise2(s * 0.03 + side * 7, y * 0.2) * 1.6, 0, 1) * 0.35 : 0;
   const k = j * ao * wet;
-  _c[0] = lerp(c[0] * k, 0.30, moss); _c[1] = lerp(c[1] * k, 0.34, moss); _c[2] = lerp(c[2] * k, 0.24, moss);
+  _c[0] = lerp(c[0] * k, 0.30, moss); _c[1] = lerp((c[1] + 0.035) * k, 0.34, moss); _c[2] = lerp((c[2] + 0.035) * k, 0.24, moss);
   return _c;
 }
 function dustLedges(g) {
@@ -110,11 +110,23 @@ function sideProfile(s, side, out) {
   let rimLat = 0;
   for (const L of LEVELS) {
     const y = Math.min(L, H);
-    const l = wallLat(s, y, side);
+    // Only remove material from the collision envelope. Recesses form harder
+    // caprock and irregular erosion shelves without adding flight obstacles.
+    const recess = y > 5 ? (0.5 + 0.5 * noise2(s * 0.038 + side * 19, y * 0.085)) *
+      (1.2 + 2.8 * Math.pow(Math.sin(y * 0.19 + noise1(s * 0.007)), 8)) : 0;
+    const garden = side === -1 ? smoothstep(1990, 2040, s) * (1 - smoothstep(2250, 2310, s)) : 0;
+    const dam = side === -1 ? smoothstep(4370, 4410, s) * (1 - smoothstep(4560, 4610, s)) : 0;
+    const alcove = garden * smoothstep(20, 25, y) * (1 - smoothstep(65, 72, y)) * 26
+      + dam * smoothstep(28, 34, y) * (1 - smoothstep(96, 104, y)) * 26;
+    const cascade = side === 1 ? Math.max(...[1850, 7080].map(c => (1 - smoothstep(4, 14, Math.abs(s - c))))) *
+      smoothstep(1, 4, y) * (1 - smoothstep(60, 68, y)) * 8 : 0;
+    const l = wallLat(s, y, side) + recess + alcove + cascade;
     out.push([l, y]);
     rimLat = l;
   }
-  out.push([rimLat + 30, H + 3], [rimLat + 230, H + 22]);
+  const crest = 8 + 22 * (0.5 + 0.5 * noise1(s * 0.019 + side * 13));
+  out.push([rimLat + 12, H + crest], [rimLat + 38, H + crest * 0.8],
+    [rimLat + 95, H + 8], [rimLat + 230, H + 22]);
   return out;
 }
 
@@ -142,6 +154,21 @@ function addTerrain(B, i0, i1) {
     for (let j = 0; j < cols - 1; j++) {
       const a = start + i * cols + j, b = a + 1, c = a + cols, d = c + 1;
       B.tri(a, b, c); B.tri(b, d, c);
+    }
+  }
+}
+
+function addSkyline(B, sA, sB) {
+  for (let s = Math.ceil(sA / 110) * 110; s < sB; s += 110) {
+    for (const side of [-1, 1]) {
+      const h = 32 + hash2(s, side + 11) * 95;
+      const y = rimH(s), lat = side * (wallLat(s, y, side) + 165 + hash2(s, side) * 90);
+      const width = 25 + hash2(s, 91 + side) * 36;
+      // All vertices are >100 m behind the rim; no collision changes.
+      place(B, GEO.cyl6, s, lat, y + h * 0.36, width, h, width * 0.8,
+        [0.58, 0.35, 0.25], hash2(s, 22) * 6);
+      place(B, GEO.cyl6, s, lat, y + h * 0.86, width * 1.04, h * 0.09, width * 0.84,
+        [0.74, 0.48, 0.31], hash2(s, 22) * 6);
     }
   }
 }
@@ -492,15 +519,113 @@ function addOldMast(P) {
   place(P, GEO.cyl6, s + 5.5, bl, Math.max(1, bankY(s, bl)) + 0.6, 1.1, 0.35, 1.1, [0.25, 0.5, 0.55], 0.6, 0, Math.PI / 2 - 0.1);
 }
 
+// Sheltered terraces and the surviving side abutment of a breached colonial dam.
+// New structures sit behind the analytic wall. The river opening stays untouched.
+function outerWall(s, y0, y1, ds, side) {
+  let lat = 0;
+  for (let ss = s - ds; ss <= s + ds; ss += 2)
+    for (let y = y0; y <= y1; y += 1) lat = Math.max(lat, wallLat(ss, y, side));
+  return lat + 1;
+}
+function addColonial(P, E, sA, sB) {
+  for (let s = 2050; s <= 2230; s += 30) {
+    if (s < sA || s >= sB) continue;
+    for (const y of [26, 50]) {
+      const lat = -(outerWall(s, y - 3, y + 10, 13, -1) + 11);
+      place(P, GEO.box, s, lat - 5, y - 1.4, 20, 2.5, 25, [0.51, 0.42, 0.31]);
+      for (const ds of [-9, 9]) place(P, GEO.box, s + ds, lat, y - 4, 1.2, 7, 1.8, [0.34, 0.31, 0.25]);
+      place(P, GEO.box, s, lat - 5, y + 0.02, 17, 0.22, 22, [0.28, 0.37, 0.23]);
+      for (let k = -1; k <= 1; k++) {
+        place(P, GEO.box, s + k * 7, lat - 4, y + 0.4, 13, 0.5, 1.8, [0.39, 0.45, 0.24]);
+      }
+      if (s % 60 === 10) {
+        place(P, GEO.box, s, lat - 8, y + 3, 8, 6, 10, [0.65, 0.63, 0.53]);
+        place(P, GEO.dome, s, lat - 8, y + 6, 5.5, 3, 6, [0.37, 0.57, 0.52]);
+        place(E, GEO.box, s - 5.1, lat - 8, y + 3.2, 0.08, 0.65, 6, [1.1, 0.77, 0.35]);
+      }
+    }
+  }
+  for (let s = 4420; s <= 4550; s += 26) {
+    if (s < sA || s >= sB) continue;
+    const lat = -(outerWall(s, 32, 92, 13, -1) + 14), top = (s > 4510 ? 55 : 80) + hash2(s, 29) * 14;
+    place(P, GEO.box, s, lat, (34 + top) / 2, 13, top - 34, 22, [0.57, 0.52, 0.44]);
+    for (const ds of [-7, 5]) place(P, GEO.box, s + ds, lat + 6.6, (top + 34) / 2, 0.4, top - 34, 1.5, [0.36, 0.32, 0.27]);
+    place(P, GEO.box, s, lat + 7, 54, 2, 4, 24, [0.30, 0.28, 0.26]);
+    place(P, GEO.box, s, lat, top + 1, 18, 2, 23, [0.71, 0.62, 0.48]);
+    place(P, GEO.cyl8, s, lat + 8, 70, 1.7, 24, 1.7, [0.38, 0.29, 0.21], 0, Math.PI / 2);
+    place(E, GEO.box, s - 10, lat + 7, top - 4, 0.12, 0.5, 5, [1.3, 0.46, 0.12]);
+  }
+}
+
+export const FALLS = [];
+function addFalls(grp, sA, sB) {
+  for (const s of [1850, 7080]) {
+    if (s < sA || s >= sB) continue;
+    const B = new Builder(), rows = 24, width = s === 1850 ? 7 : 4;
+    for (let i = 0; i <= rows; i++) {
+      const y = 3 + i / rows * 57;
+      for (const d of [-width / 2, width / 2]) {
+        const ss = s + d, lat = outerWall(s, y - 1, y + 2, width / 2 + 1, 1) + 0.3;
+        const p = toWorld(ss, lat, y, new THREE.Vector3());
+        B.v(p.x, p.y, p.z, 1, 1, 1, d / width + 0.5, y / 57);
+      }
+    }
+    for (let i = 0; i < rows; i++) { const a = i * 2; B.tri(a, a + 2, a + 1); B.tri(a + 1, a + 2, a + 3); }
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: `varying vec2 vUv; varying float vD; void main(){ vUv=uv; vec4 mv=modelViewMatrix*vec4(position,1.0); vD=-mv.z; gl_Position=projectionMatrix*mv; }`,
+      fragmentShader: `uniform float uTime; varying vec2 vUv; varying float vD;
+      void main(){ float edge=smoothstep(0.0,0.18,vUv.x)*smoothstep(1.0,0.82,vUv.x);
+        float run=sin(vUv.x*37.0+sin(vUv.y*24.0+uTime*4.0)*1.4)*0.3+sin(vUv.x*81.0+vUv.y*17.0+uTime*3.0)*0.2+0.5;
+        float spray=pow(1.0-vUv.y,8.0);
+        float a=edge*(0.18+run*0.40+spray*0.3)*exp(-vD*vD*0.0000036);
+        gl_FragColor=vec4(mix(vec3(0.48,0.67,0.61),vec3(0.88,0.88,0.74),run*0.6+spray*0.4),a); }`,
+    });
+    const m = mk(B, mat); m.userData.detail = true; m.userData.highOnly = s === 7080;
+    grp.add(m); FALLS.push(m);
+    const p = toWorld(s, wallLat(s, 3, 1) + 1, 3, new THREE.Vector3());
+    VENTS.push({ p, k: 0 });
+  }
+}
+
 // --------------------------------------------------------------- materials
 export const terrainTex = {};
 export function makeTerrainMaterial() {
   const { map, normalMap } = rockTextures(512);
   terrainTex.map = map; terrainTex.normalMap = normalMap;
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map, normalMap, normalScale: new THREE.Vector2(1.3, 1.3) });
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map, normalMap, normalScale: new THREE.Vector2(0.45, 0.45) });
+  // World-space mineral seams break up the UV tile. Analytic, no added texture
+  // fetches / draws; the original normal map supplies close-range rock grain.
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = 'varying vec3 vStone;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vStone = (modelMatrix * vec4(position, 1.0)).xyz;');
+    shader.fragmentShader = 'varying vec3 vStone;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      float warp = sin(vStone.x * 0.009 + vStone.z * 0.006) * 2.8 + sin(vStone.z * 0.031) * 0.6;
+      float bed = vStone.y + warp;
+      float seam = smoothstep(0.90, 0.97, fract(bed * 0.31));
+      float lamina = sin(bed * 5.3) * sin(bed * 1.7) * 0.045;
+      float run = sin(vStone.x * 0.43 + sin(vStone.z * 0.14)) * sin(vStone.z * 0.37 + vStone.y * 0.025);
+      float varnish = smoothstep(0.45, 0.9, run) * 0.14;
+      diffuseColor.rgb *= 1.05 + lamina - seam * 0.22 - varnish;
+      diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 1.04, 0.91), smoothstep(0.60, 0.95, fract(bed * 0.073)) * 0.35);
+    `);
+  };
   return mat;
 }
 export const propMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+// Shared weathering keeps colonial concrete and metal from reading as clean boxes.
+propMat.onBeforeCompile = (shader) => {
+  shader.vertexShader = 'varying vec3 vWear;\n' + shader.vertexShader;
+  shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vWear = (modelMatrix * vec4(position, 1.0)).xyz;');
+  shader.fragmentShader = 'varying vec3 vWear;\n' + shader.fragmentShader;
+  shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+    float streak = sin(vWear.x * 1.2 + vWear.z * 0.91 + sin(vWear.y * 0.08));
+    float grain = sin(vWear.x * 19.0 + vWear.y * 31.0) * sin(vWear.z * 27.0 - vWear.y * 7.0);
+    diffuseColor.rgb *= 0.94 + grain * 0.055 - smoothstep(0.45, 1.0, streak) * 0.16;
+  `);
+};
 export const emissiveMat = new THREE.MeshBasicMaterial({ vertexColors: true });
 
 // --------------------------------------------------------------- chunks
@@ -521,6 +646,7 @@ export function buildChunks(scene, mat) {
     const sA = S0 + c0 * SEC, sB = S0 + c1 * SEC;
     const B = new Builder(), D = new Builder(), P = new Builder(), E = new Builder(), S = new Builder();
     addTerrain(B, c0, c1);
+    addSkyline(B, sA, sB);
     for (const r of ROCKS) if (r.s >= sA && r.s < sB && !r.wreck) addRock(B, r);
     for (const a of ARCHES) if (a.s >= sA && a.s < sB) addArch(B, a);
     for (const b of BEACONS) if (b.s >= sA && b.s < sB) {
@@ -542,6 +668,7 @@ export function buildChunks(scene, mat) {
     addScree(D, sA, sB, R);
     addLichen(P, sA, sB, R);
     addPipe(P, sA, sB);
+    addColonial(P, E, sA, sB);
     for (const c of DRESS.cables) if (c.s >= sA && c.s < sB) addCable(P, c);
     for (const r of DRESS.ruins) if (r.s >= sA && r.s < sB) addRuin(P, r);
     for (const g of DRESS.signs) if (g.s >= sA && g.s < sB) addSign(P, E, g);
@@ -553,6 +680,7 @@ export function buildChunks(scene, mat) {
     const grp = new THREE.Group();
     grp.matrixAutoUpdate = false;
     grp.userData = { sA, sB };
+    addFalls(grp, sA, sB);
     const base = mk(B, mat);
     dustLedges(base.geometry);
     base.receiveShadow = true;
@@ -631,8 +759,8 @@ void main(){
     // sun + mirror-sun glints (HDR -> bloom)
     float sp1 = pow(max(dot(R, uSun), 0.0), 380.0), sp2 = pow(max(dot(R, uSun2), 0.0), 900.0);
     float sparkle = step(0.93, h21(floor(p * vec2(2.2, 1.6) + floor(t * 9.0))));
-    col += vec3(1.5, 1.1, 0.7) * (sp1 * 1.3 + sp1 * sparkle * 2.0) * uGlint;
-    col += vec3(0.85, 0.95, 1.2) * (sp2 * 2.2 + pow(max(dot(R, uSun2), 0.0), 120.0) * 0.12) * uGlint;
+    col += vec3(1.5, 1.1, 0.7) * (sp1 * 0.85 + sp1 * sparkle * 1.2) * uGlint;
+    col += vec3(0.85, 0.95, 1.2) * (sp2 * 1.2 + pow(max(dot(R, uSun2), 0.0), 120.0) * 0.12) * uGlint;
     // flow streaks + bank foam
     float streak = smoothstep(0.62, 0.95, vn(vec2(p.x * 0.8, p.y * 0.02 - t * 1.4)));
     col += vec3(0.08, 0.13, 0.12) * streak;
@@ -837,10 +965,10 @@ void main(){
   vec2 h = r * 0.5;
   vec2 a = mod(p, r) - h, b = mod(p - h, r) - h;
   vec2 g = dot(a, a) < dot(b, b) ? a : b;
-  float edge = smoothstep(0.42, 0.5, max(abs(g.x) * 0.866 + abs(g.y) * 0.5, abs(g.y)));
+  float edge = (1.0 - smoothstep(0.012, 0.035, abs(0.5 - max(abs(g.x), dot(abs(g), vec2(0.5, 0.866))))));
   float scan = 0.5 + 0.5 * sin(vUv.x * 0.05 - uTime * 2.0 + vUv.y * 0.02);
-  float fres = 1.0 - abs(dot(normalize(vN), vV));
-  float a1 = (0.025 + edge * 0.13 * (0.4 + 0.6 * scan) + fres * 0.08) * uAlpha * uFlick;
+  float fres = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+  float a1 = (0.004 + edge * 0.045 * (0.4 + 0.6 * scan) + pow(fres, 3.0) * 0.08) * uAlpha * uFlick;
   // curtains hanging from the vault ends fade out downward
   a1 *= mix(1.0, smoothstep(0.0, 1.0, vCap) * (0.8 + 0.4 * sin(vUv.x * 0.3 + uTime * 3.0)), step(0.001, vCap));
   vec3 col = mix(vec3(0.25, 0.85, 1.0), vec3(0.7, 1.0, 1.0), edge);
@@ -955,14 +1083,22 @@ void main(){
     vec3 cool = vec3(0.76, 0.9, 1.0);
     col += cool * (exp(-ang * 13.0) * 0.2 + exp(-ang * 48.0) * 0.4) * flick;
     float rq = (ang - 0.06) / 0.0026;
-    col += cool * exp(-rq * rq) * 0.85 * flick;
+    col += cool * exp(-rq * rq) * 0.32 * flick;
     float rq2 = (ang - 0.098) / 0.005;
-    col += cool * exp(-rq2 * rq2) * 0.16 * flick;
+    col += cool * exp(-rq2 * rq2) * 0.07 * flick;
     float sx = exp(-abs(q.y) * 380.0) * exp(-abs(q.x) * 8.0);
     float sy = exp(-abs(q.x) * 380.0) * exp(-abs(q.y) * 20.0);
-    col += cool * (sx * 0.85 + sy * 0.45) * flick;
+    col += cool * (sx * 0.35 + sy * 0.20) * flick;
     col = mix(col, vec3(2.4, 2.6, 2.85) * (0.82 + 0.18 * flick), smoothstep(0.0165, 0.0142, ang));
   }
+  // Phobos is irregular and larger; Deimos is a distant pin of reflected light.
+  vec3 moonDir = normalize(vec3(-0.34, 0.46, -0.82));
+  float md = length(d - moonDir);
+  float limb = 0.0068 * (1.0 + 0.08 * sin(atan(d.y - moonDir.y, d.x - moonDir.x) * 5.0));
+  float moon = 1.0 - smoothstep(limb - 0.0006, limb + 0.0006, md);
+  col = mix(col, vec3(0.47, 0.36, 0.29) * (0.8 + 0.2 * vn(d.xz * 3500.0)), moon * 0.85);
+  float deimos = 1.0 - smoothstep(0.0011, 0.0018, length(d - normalize(vec3(0.56, 0.38, -0.74))));
+  col = mix(col, vec3(1.05, 0.85, 0.67), deimos * 0.8);
   // distant mesas: three hazy layers with parallax (far -> near)
   float L3 = skyline(dxz, 6000.0, 1.0 / 900.0, 0.012, 0.05, 1.0);
   if (h < L3) col = mix(vec3(0.74, 0.46, 0.36), uHor, 0.62);

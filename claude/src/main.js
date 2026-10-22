@@ -12,7 +12,7 @@ import {
   buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP,
 } from './naval.js';
 import {
-  buildChunks, buildWater, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS,
+  buildChunks, buildWater, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS, FALLS,
 } from './terrain.js';
 import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js';
 import { Ship, makeEnvMap } from './ship.js';
@@ -47,6 +47,7 @@ renderer.info.autoReset = false;
 
 const HOR = [0.93, 0.62, 0.46], ZEN = [0.58, 0.34, 0.3];
 const FOG_AIR = new THREE.Color(0.88, 0.58, 0.44), FOG_WATER = new THREE.Color(0.071, 0.243, 0.278);   // codex-style #123e47
+const FOG_THIN = new THREE.Color(0.55, 0.48, 0.43);
 const FOG_D_AIR = 0.0019, FOG_D_WATER = 0.019;
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(FOG_AIR.clone(), FOG_D_AIR);
@@ -61,7 +62,7 @@ const dirAzEl = (az, el) => new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.
 const DEG = Math.PI / 180;
 const SUN = dirAzEl(10 * DEG, 10.5 * DEG);
 const SUN2 = dirAzEl(28 * DEG, 15.5 * DEG);
-const hemi = new THREE.HemisphereLight(0xffb48c, 0x6a2e1c, 1.85);
+const hemi = new THREE.HemisphereLight(0xffd3b0, 0x55566a, 1.85);
 scene.add(hemi);
 const sunL = new THREE.DirectionalLight(0xffd2a0, 2.6);
 sunL.castShadow = true;
@@ -132,7 +133,7 @@ function applyQuality(name) {
   post.apply(name, innerWidth, innerHeight, DEVICE_DPR);
   ship.setQuality(name);
   const T = TIERS[name];
-  for (const c of chunks) for (const m of c.children) if (m.userData.detail) m.visible = T.detail;
+  for (const c of chunks) for (const m of c.children) if (m.userData.detail) m.visible = T.detail && (!m.userData.highOnly || name === 'high');
   shafts.visible = T.name !== 'low';
   motes.obj.visible = T.name !== 'low';
   waterMat.uniforms.uGlint.value = T.glintK;
@@ -2047,7 +2048,7 @@ function updateShipVisual(dt, time) {
 // ------------------------------------------------------------------ camera
 let fovCur = 68;
 const CAM_MARGIN = 5;
-let closeCam = null;
+let closeCam = null, cineCam = null, frozen = false;
 function updateCamera(dt, time) {
   const under = G.underwater;
   const start = G.phase === 'start';
@@ -2112,8 +2113,14 @@ function updateCamera(dt, time) {
     camera.position.copy(shipPos).add(V3.applyQuaternion(ship.group.quaternion));
     camera.lookAt(shipPos);
   }
-  const fovT = 64 + clamp((G.speed - 60) * 0.18, -6, 8) + G.boost * 12;
-  fovCur += (fovT - fovCur) * damp(3, dt);
+  if (cineCam) {
+    // debug cinematic camera (test hook only): free camera in path space looking at a path-space point
+    const c = cineCam;
+    toWorld(c.s, c.lat, c.y, camera.position);
+    camera.lookAt(toWorld(c.ls, c.llat, c.ly, V3));
+  }
+  const fovT = cineCam && cineCam.fov ? cineCam.fov : 64 + clamp((G.speed - 60) * 0.18, -6, 8) + G.boost * 12;
+  fovCur += (fovT - fovCur) * (cineCam ? 1 : damp(3, dt));
   if (Math.abs(camera.fov - fovCur) > 0.05) { camera.fov = fovCur; camera.updateProjectionMatrix(); }
 
   // underwater look (codex-style teal fog, shorter distance)
@@ -2133,6 +2140,12 @@ function updateCamera(dt, time) {
     sunL.intensity = cu ? 1.2 : 2.6;
     hud.tintUnder.style.opacity = cu ? 1 : 0;
     post.grade.uniforms.uTintK.value = 0;
+  }
+  const thinLook = !cu && zoneAt(G.s)?.shielded === false;
+  if (!cu) {
+    post.grade.uniforms.uTint.value.set(0.22, 0.21, 0.20);
+    post.grade.uniforms.uTintK.value = thinLook ? 0.22 : 0;
+    scene.fog.color.copy(FOG_AIR).lerp(FOG_THIN, thinLook ? 0.6 : 0);
   }
   // speed streaks / dust
   const su = streaks.mat.uniforms;
@@ -2592,6 +2605,7 @@ function loop() {
   if (fpsAcc > 0.5) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
   governor.frame(rawDt);
   if (portraitMQ.matches && G.phase !== 'start' && G.phase !== 'result') dt = 0;
+  if (frozen) dt = 0;   // debug: freeze the simulation (cinematic shots)
   time += dt;
   simTime = time;
   G.armorT -= realDt;
@@ -2658,11 +2672,13 @@ function loop() {
   beams.end();
 
   // chunk streaming / culling by path distance
-  const s0 = G.s - 320, s1 = G.s + 1350;
+  const sv = cineCam ? cineCam.s : G.s;
+  const s0 = sv - 320, s1 = sv + 1350;
   for (const c of chunks) c.visible = c.userData.sB > s0 && c.userData.sA < s1;
   for (const w of waters) w.visible = w.userData.sB > s0 && w.userData.sA < s1;
   for (const z of ZONES) if (z.mesh && z.shielded) z.mesh.visible = z.s1 > s0 && z.s0 < s1;
 
+  for (const m of FALLS) m.material.uniforms.uTime.value = time;
   waterMat.uniforms.uTime.value = time;
   foam.material.uniforms.uTime.value = time;
   shafts.material.uniforms.uTime.value = time;
@@ -2802,6 +2818,9 @@ window.__lethe = {
       };
     },
     closeCam: (az = 35, el = 15, dist = 22) => { closeCam = az === null ? null : { az, el, dist }; },
+    // round 8: free cinematic camera {s, lat, y, ls, llat, ly, fov} (null = off) and a simulation freeze
+    cine: (c) => { cineCam = c || null; },
+    freeze: (on = true) => { frozen = !!on; },
     shipCam: () => ({ ship: shipPos.toArray(), cam: camera.position.toArray() }),
   },
 };
