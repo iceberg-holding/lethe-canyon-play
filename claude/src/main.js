@@ -1,4 +1,4 @@
-import { buildBoatFX, WAKE_W } from './boat-fx.js';
+import { buildBoatFX, buildBoatUnderFX, WAKE_W } from './boat-fx.js';
 // LETHE / ЛЕТА — "Delivery" prototype. Game loop, flight model, shooting, shield, LETHE spotters
 // and turrets, hazards, camera, HUD, adaptive quality.
 import * as THREE from 'three';
@@ -33,7 +33,8 @@ let tipsOn = tipsParam !== null ? tipsParam !== '0' : lsGet(TIPS_KEY) !== '0';
 if (tipsParam === '1') lsSet(TUT_KEY, null);
 const tutArmed = () => tipsOn && lsGet(TUT_KEY) !== '1';
 const TUT_R = 400, TUT_SLOW = 0.3, TUT_EASE = 0.4, TUT_HOLD = 2.1, TUT_PROMPT = 4;
-const TUT = { phase: 'idle', t: 0, boat: null, hold: false, dist: 0, dived: false, outAt: 0, minScale: 1, count: 0, frozen: false, triggerAt: null, releaseAt: null, triggerS: null };
+const TUT_CUE = 7;   // round 12: seconds after the tutorial dive during which a torpedo lock pulses the ROCKET button
+const TUT = { cueT: 0, cueSeen: false, phase: 'idle', t: 0, boat: null, hold: false, dist: 0, dived: false, outAt: 0, minScale: 1, count: 0, frozen: false, triggerAt: null, releaseAt: null, triggerS: null };
 let timeScale = 1;
 const NOBOOST = params.get('noboost') === '1';   // autopilot at cruise speed (timing tests)
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -244,9 +245,14 @@ const mineM = buildMines(MINES.length, navalMat);
 scene.add(mineM.mines, mineM.chains, mineM.sinkers);
 const hunterMesh = buildHunters(HUNTERS.length, navalMat);
 scene.add(hunterMesh);
-const boatM = buildBoats(BOATS.length, rimMaterial([0.85, 0.85, 0.8], 0.35));
+const boatMat = rimMaterial([0.85, 0.85, 0.8], 0.35);
+const boatM = buildBoats(BOATS.length, boatMat);
 const boatFX = buildBoatFX(BOATS.length), boatWaterM = new THREE.Matrix4();
 scene.add(...Object.values(boatFX));
+// round 12: boat seen from below (Snell glow + caustic ripples + wake turbulence, propeller-wash bubbles), underwater only
+const boatUFX = buildBoatUnderFX(BOATS.length, FOG_D_WATER);
+scene.add(boatUFX.under, boatUFX.wash);
+const HULL_UW = new THREE.Color(0.2, 0.2, 0.21), HULL_AIR = new THREE.Color(1, 1, 1);   // hull albedo: dark silhouette from below
 scene.add(boatM.pF, boatM.pB, boatM.sF, boatM.sB, boatM.panels);
 for (const m of MINES) { m.wp = new THREE.Vector3(0, -1e4, 0); m.anchor = new THREE.Vector3(); }
 for (const h of HUNTERS) { h.wp = new THREE.Vector3(0, -1e4, 0); h.nose = new THREE.Vector3(); h.fwd = new THREE.Vector3(0, 0, -1); }
@@ -373,6 +379,7 @@ function freshState() {
     mineHinted: false, hunterHinted: false, boatHinted: false,
     relayKills: 0, relayHinted: false, blindSaid: false, noRelay: false, blockLogged: false, lockLog: [], beamSegs: 0, beamTurret: -1,
     waterBurned: 0, waterSpilled: 0, burnRate: 0, thinAir: false, steam: 0, burnHinted: false, thinHinted: false,
+    dmgTaken: 0, uwCam: 0,
   };
 }
 G = freshState();
@@ -494,6 +501,7 @@ function shieldImpact(p) {
 // returns damage that got through to the hull/cargo
 function damage(amount, p, kind) {
   if (G.phase === 'result' || G.phase === 'failed') return 0;
+  G.dmgTaken += amount;
   G.shieldCd = SHIELD_DELAY;
   let rest = amount;
   if (G.shield > 0) {
@@ -760,6 +768,7 @@ function fire() {
 // reach (bolts angle up to the ledges). Only with a clear line of fire; never toward a mast, and never when a mast
 // sits on the line of fire.
 const AIM_CONE = 0.105, AIM_TURRET_H = 0.2, AIM_TURRET_UP = 0.62, AIM_RANGE = 240;
+const AIM_UW_BOAT = 25 * DEG;   // round 12
 const AIM_H = new THREE.Vector3(), AIM_D = new THREE.Vector3();
 const aimHit = { obj: null, kind: '', wp: null };
 function mastOnLine(p, wp) {
@@ -796,7 +805,8 @@ function aimTarget(p, widen = 1) {
         score = ah * 0.5 + Math.abs(ev) * 0.1;
       } else {
         const a = Math.acos(clamp(V3.dot(shipFwd) / d, -1, 1));
-        if (a > AIM_CONE * 1.3 * widen) return;
+        // round 12: submerged, a boat's belly weak point gets a strong assist (±25°): bolts converge on it
+        if (a > (uw && kind === 'boat' ? AIM_UW_BOAT : AIM_CONE * 1.3) * widen) return;
         score = a * 0.4;   // close naval threats take priority over distant rim targets
       }
       if (score >= bestScore || !viewLOS(p, o.wp, G.s)) return;
@@ -1079,6 +1089,149 @@ function uwBoltWorld(b) {
   return hit;
 }
 
+// ------------------------------------------------------------------ round 12: torpedoes (ROCKET while submerged)
+// Same ammo, cooldown and recoil as a rocket. Auto-acquires the nearest alive boat within ~250 m ahead in a wide
+// cone (±60° horizontally, any elevation: no pitch-up needed). The torpedo runs in path space just below the surface
+// (so it follows the river bends and slips around rock columns), then rises into the boat's belly.
+// Damage: a smuggler sinks to one torpedo; a Council patrol boat takes two (each breaches half its hull, shown on its HP bar).
+// No target: it runs straight along the river and scuttles itself after ~3 s.
+const TORP_RANGE = 250, TORP_COS = Math.cos(60 * DEG), TORP_SPEED = 88, TORP_ACC = 75, TORP_TURN = 4.2, TORP_RUN_Y = -2.5, TORP_RISE = 34;
+const TORP_LIFE = 6, TORP_FREE_LIFE = 3, TORP_N = 4;
+const TORP_DMG = { smuggler: BOAT_HP, patrol: BOAT_HP / 2 };
+const TORP = { target: null, lockT: 0, pingT: 0, fired: 0, hits: 0, kills: 0, scuttled: 0, log: [] };
+const torps = [];
+for (let i = 0; i < TORP_N; i++) torps.push({ on: false, s: 0, lat: 0, y: 0, vs: 0, vl: 0, vy: 0, p: new THREE.Vector3(), q: new THREE.Vector3(), dir: new THREE.Vector3(0, 0, -1), target: null, age: 0, life: 0 });
+const torpMesh = new THREE.InstancedMesh(mergeGeometries([
+  colored(tr(new THREE.CylinderGeometry(0.26, 0.26, 2.2, 8), 0, 0, 0, Math.PI / 2), [0.2, 0.22, 0.24]),
+  colored(tr(new THREE.SphereGeometry(0.26, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), 0, 0, -1.1, -Math.PI / 2), [0.75, 0.42, 0.12]),
+  colored(tr(new THREE.CylinderGeometry(0.26, 0.1, 0.5, 8), 0, 0, 1.35, Math.PI / 2), [0.16, 0.17, 0.18]),
+  colored(tr(new THREE.BoxGeometry(0.9, 0.04, 0.3), 0, 0, 1.3), [0.3, 0.32, 0.34]),
+  colored(tr(new THREE.BoxGeometry(0.04, 0.9, 0.3), 0, 0, 1.3), [0.3, 0.32, 0.34]),
+]), navalMat, TORP_N);
+torpMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); torpMesh.frustumCulled = false;
+for (let i = 0; i < TORP_N; i++) torpMesh.setMatrixAt(i, ZERO_M);
+scene.add(torpMesh);
+// lock: nearest alive boat in the cone, measured in path space (along the river, like the torpedo's own run)
+function findTorpedoTarget() {
+  if (!G.underwater || G.phase !== 'flight') return null;
+  const head = Math.atan2(G.vLat, Math.max(1, G.speed));
+  let best = null, bd = TORP_RANGE;
+  for (const b of BOATS) {
+    if (!b.alive) continue;
+    const ds = b.s - G.s, dl = b.lat - G.lat, d = Math.hypot(ds, dl, b.wp.y - shipPos.y);
+    if (d > bd || ds < -2) continue;
+    if (d > 6 && Math.cos(Math.atan2(dl, ds) - head) < TORP_COS) continue;
+    bd = d; best = b;
+  }
+  return best;
+}
+function fireTorpedo() {
+  if (G.rocketCd > 0) return;
+  if (G.rockets <= 0) { audio.empty(); popScore('NO TORPEDOES / НЕТ ТОРПЕД'); G.rocketCd = 0.4; return; }
+  const t = torps.find((x) => !x.on);
+  if (!t) return;
+  G.rockets--; G.rocketsFired++; G.rocketCd = ROCKET_CD; TORP.fired++;
+  ship.body.updateMatrixWorld();
+  const p = ship.body.localToWorld(V1.copy(ship.rocketPort));
+  const pr = projectToPath(p.x, p.z, G.s);
+  t.on = true; t.s = pr.s; t.lat = pr.lat; t.y = Math.min(p.y, -1.2); t.vs = G.speed + 10; t.vl = G.vLat; t.vy = 0; t.age = 0;
+  t.target = findTorpedoTarget(); t.life = t.target ? TORP_LIFE : TORP_FREE_LIFE;
+  toWorld(t.s, t.lat, t.y, t.p); t.q.copy(t.p);
+  TORP.log.push({ t: +G.t.toFixed(2), target: BOATS.indexOf(t.target), type: t.target ? t.target.type : null, s: +G.s.toFixed(0), y: +G.y.toFixed(2), pitch: +G.pitch.toFixed(3) });
+  // the rocket's recoil: forward dip, nose kick, camera push-back + short shake
+  G.recoilT = 0; G.kick = 1;
+  G.shake = Math.min(1.4, G.shake + 0.42);
+  for (let i = 0; i < 22; i++) mist.emit(p.x, p.y, p.z, shipVel.x * 0.3 + (Math.random() - 0.5) * 7, 1 + Math.random() * 4, shipVel.z * 0.3 + (Math.random() - 0.5) * 7, 0.8 + Math.random() * 0.8, 0.35, 1.3, 0.8, 1, 1, 0.75, -7, 2.2);
+  sparks.emit(p.x, p.y, p.z, shipVel.x, shipVel.y, shipVel.z, 0.12, 4, 3, 0.5, 1.6, 1.8, 1);
+  lightFlash(p, 170, 0.16, 0.4, 0.9, 1);
+  audio.torpedo();
+  if (TUT.cueT > 0) TUT.cueT = 0;   // the tutorial's "now fire [R]" cue is done
+}
+function torpedoHit(t, bt) {
+  t.on = false;
+  TORP.hits++;
+  const p = t.p.clone();
+  p.y = Math.max(p.y, BOAT_KEEL - 0.4);
+  underwaterBlast(p, 1.25);
+  for (const m of MINES) if (m.alive && m.wp.distanceTo(p) < 10) { m.fuse = 0.06 + m.wp.distanceTo(p) * 0.01; m.cause = 'chain'; }
+  for (const h of HUNTERS) if (h.alive && h.wp.distanceTo(p) < 9) killHunter(h);
+  if (!bt.alive) return;
+  bt.hp = Math.max(0, bt.hp - TORP_DMG[bt.type]); bt.flashT = 0.5;
+  const c = bt.type === 'patrol' ? [0.6, 1.8, 2] : [2, 1.1, 0.4];
+  for (let i = 0; i < 26; i++) sparks.emit(p.x, p.y, p.z, (Math.random() - 0.5) * 20, Math.random() * 10, (Math.random() - 0.5) * 20, 0.4, 1.2, 0.3, c[0], c[1], c[2], 1, 0, 3);
+  if (bt.hp <= 0) { TORP.kills++; killBoat(bt); }
+  else { audio.hitTick(); hitMarker(); popScore(`HULL ${Math.round((bt.hp / BOAT_HP) * 100)}% · ONE MORE / ЕЩЁ ОДНА`); }
+}
+function updateTorpedoes(dt) {
+  for (let i = 0; i < TORP_N; i++) {
+    const t = torps[i];
+    if (!t.on) { torpMesh.setMatrixAt(i, ZERO_M); continue; }
+    t.age += dt; t.life -= dt;
+    if (t.target && !t.target.alive) { t.target = null; t.life = Math.min(t.life, 1.2); }
+    const sp = Math.min(TORP_SPEED, Math.hypot(t.vs, t.vl) + TORP_ACC * dt);
+    let hd = Math.atan2(t.vl, t.vs), ty = TORP_RUN_Y;
+    const b = t.target;
+    if (b) {
+      const ds = b.s - t.s, dl = b.lat - t.lat, d = Math.hypot(ds, dl);
+      // pursuit in path space with a capped turn rate; rise into the belly over the last ~34 m
+      let err = Math.atan2(dl, ds) - hd;
+      err = Math.atan2(Math.sin(err), Math.cos(err));
+      hd += clamp(err, -TORP_TURN * dt, TORP_TURN * dt);
+      if (d < TORP_RISE) ty = BOAT_KEEL + 0.4;
+    }
+    // slip around rock columns ahead
+    for (const r of ROCKS) {
+      const rs = r.s - t.s, rl = t.lat - r.lat;
+      if (rs > -2 && rs < r.r + 14 && Math.abs(rl) < r.r + 2.5) { t.lat += Math.sign(rl || 1) * Math.min(Math.abs(Math.abs(rl) - r.r - 2.5), 30 * dt); }
+    }
+    t.vs = Math.cos(hd) * sp; t.vl = Math.sin(hd) * sp;
+    t.vy += (clamp((ty - t.y) * 4, -10, 10) - t.vy) * damp(6, dt);
+    t.s += t.vs * dt; t.lat += t.vl * dt; t.y += t.vy * dt;
+    const lim = underLim(t.s) - 0.5;
+    t.lat = clamp(t.lat, -lim, lim);
+    t.y = clamp(t.y, bedY(t.s, t.lat) + 0.7, -0.8);
+    t.q.copy(t.p); toWorld(t.s, t.lat, t.y, t.p);
+    if (t.p.distanceToSquared(t.q) > 1e-6) t.dir.copy(t.p).sub(t.q).normalize();
+    let hit = null;
+    for (const bt of BOATS) if (bt.alive && Math.abs(bt.s - t.s) < 30 && inBoat(bt, t.p, 0.9)) { hit = bt; break; }
+    if (hit) { torpedoHit(t, hit); torpMesh.setMatrixAt(i, ZERO_M); continue; }
+    if (t.life <= 0) {
+      // scuttled: a muffled pop of bubbles, harmless
+      t.on = false; TORP.scuttled++;
+      for (let k = 0; k < 24; k++) mist.emit(t.p.x, t.p.y, t.p.z, (Math.random() - 0.5) * 6, 1 + Math.random() * 5, (Math.random() - 0.5) * 6, 1 + Math.random(), 0.35, 1.2, 0.8, 1, 1, 0.75, -7, 2);
+      sparks.emit(t.p.x, t.p.y, t.p.z, 0, 0, 0, 0.2, 3, 7, 0.5, 1.5, 1.7, 1);
+      torpMesh.setMatrixAt(i, ZERO_M);
+      continue;
+    }
+    M1.lookAt(V1.set(0, 0, 0), V2.copy(t.dir).negate(), UP);
+    M1.multiply(M2.makeRotationZ(t.age * 9));
+    M1.setPosition(t.p);
+    torpMesh.setMatrixAt(i, M1);
+    // bubble trail + pale wake streak + cold motor glow; a faint wake line just under the surface above it
+    const tail = V3.copy(t.p).addScaledVector(t.dir, -1.6);
+    beams.add(tail.x - t.dir.x * 9, tail.y - t.dir.y * 9, tail.z - t.dir.z * 9, tail.x, tail.y, tail.z, 0.5, 0.55, 1.25, 1.3, 0.8);
+    glows.add(tail.x, tail.y, tail.z, 0.5, 1.6, 1.8, 0.9, 1.6);
+    glows.add(t.p.x, t.p.y, t.p.z, 0.4, 1.1, 1.3, 0.3, 4.5);
+    if (quality !== 'low') beams.add(tail.x - t.dir.x * 14, -0.15, tail.z - t.dir.z * 14, tail.x, -0.15, tail.z, 1.1, 0.5, 0.75, 0.8, 0.45);
+    // bubbles per metre travelled (frame-rate independent), spacing by tier
+    t.trail = (t.trail || 0) + t.p.distanceTo(t.q) / (quality === 'low' ? 3 : quality === 'med' ? 1.5 : 0.9);
+    for (; t.trail >= 1; t.trail -= 1) {
+      const f = Math.random();
+      mist.emit(t.q.x + (t.p.x - t.q.x) * f - t.dir.x * 1.6, t.q.y + (t.p.y - t.q.y) * f, t.q.z + (t.p.z - t.q.z) * f - t.dir.z * 1.6,
+        (Math.random() - 0.5) * 1.2, 0.5 + Math.random() * 1.3, (Math.random() - 0.5) * 1.2, 1.6 + Math.random() * 1.2, 0.35, 1.3, 0.85, 1, 1, 0.75, -4, 1.6);
+    }
+  }
+  torpMesh.instanceMatrix.needsUpdate = true;
+}
+// per-frame lock (HUD bracket, sonar ping on a new lock, tutorial cue)
+function updateTorpedoLock(rdt) {
+  const tg = findTorpedoTarget();
+  if (tg && tg !== TORP.target && TORP.pingT <= 0) { audio.torpedoLock(); TORP.pingT = 0.8; }
+  TORP.pingT -= rdt;
+  TORP.lockT = tg ? (tg === TORP.target ? TORP.lockT + rdt : 0) : 0;
+  TORP.target = tg;
+}
+
 // ------------------------------------------------------------------ LETHE: spotters, mark, turrets
 const LOS_P = new THREE.Vector3();
 function lineOfSight(a, b, sA) {
@@ -1269,6 +1422,7 @@ function updateLethe(dt, time) {
     let dead = b.life <= 0;
     if (!dead && G.phase !== 'result' && segSphere(b.q, b.p, shipPos, b.rad)) {
       if (b.src === 'turret') G.turretHits++; else G.navalHits++;
+      if (b.src === 'punish') { PUN.hits++; PUN.dmg += b.dmg; if (b.punRec) { b.punRec.hits++; b.punRec.dmg += b.dmg; } }
       const through = damage(b.dmg, b.p.clone(), 'bolt');
       G.shake = Math.min(1.4, G.shake + 0.45);
       sparkBurst(b.p, 18, through > 0 ? [1.8, 0.9, 0.4] : [0.6, 1.5, 2]);
@@ -1276,7 +1430,7 @@ function updateLethe(dt, time) {
       dead = true;
     }
     if (!dead && b.life < b.life0 - 0.1) { dead = b.under ? uwBoltWorld(b) : boltWorldHit(b); if (dead) b.why = 'world'; }
-    if (dead) { b.on = false; if (b.accurate) G.ebLog.push((b.why || 'x') + ':' + b.minD.toFixed(1) + '@' + (3 - b.life).toFixed(2)); b.why = null; continue; }
+    if (dead) { b.on = false; b.punRec = null; if (b.accurate) G.ebLog.push((b.why || 'x') + ':' + b.minD.toFixed(1) + '@' + (3 - b.life).toFixed(2)); b.why = null; continue; }
     const tl = Math.min(9, b.p.distanceTo(b.o)), c = b.col;
     V3.copy(b.p).addScaledVector(b.d, -tl);
     beams.add(V3.x, V3.y, V3.z, b.p.x, b.p.y, b.p.z, 0.75, c[0], c[1], c[2], 1);
@@ -1349,6 +1503,7 @@ function initNaval() {
     toWorld(h.ps, h.pl, h.py, h.wp);
   }
   for (const b of BOATS) {
+    b.pun = 'idle'; b.punCd = 0;
     b.heard = false; b.hp = BOAT_HP; b.head = b.dir > 0 ? 0 : Math.PI; b.sinkT = 0; b.cd = (2 + Math.random() * 2) * boatCdMul(b); b.fire = 'idle'; b.ft = 0; b.shots = 0; b.flashT = 0;
     toWorld(b.s, b.lat, BOAT_KEEL - 0.05, b.wp); toWorld(b.s, b.lat, 2.4, b.deck);
     boatM.panels.setColorAt(BOATS.indexOf(b), BOAT_PANEL[b.type]);
@@ -1363,6 +1518,7 @@ function inBoat(bt, p, m = 0) {
   const c = Math.abs(Math.cos(bt.head)), sn = Math.abs(Math.sin(bt.head));
   return Math.abs(pr.s - bt.s) < c * BOAT_HL + sn * BOAT_HW + m && Math.abs(pr.lat - bt.lat) < c * BOAT_HW + sn * BOAT_HL + m;
 }
+const NB_MID = new THREE.Vector3();
 // player bolt vs naval targets; returns true if the bolt is used up
 function navalBoltHit(b, under) {
   if (under) {
@@ -1370,7 +1526,9 @@ function navalBoltHit(b, under) {
     for (const h of HUNTERS) if (h.alive && Math.abs(h.ps - b.s) < 30 && segSphere(b.q, b.p, h.wp, 1.8)) { killHunter(h); return true; }
   }
   for (const bt of BOATS) {
-    if (!bt.alive || Math.abs(bt.s - b.s) > 24 || !inBoat(bt, b.p, 0.3)) continue;
+    if (!bt.alive || Math.abs(bt.s - b.s) > 24) continue;
+    // round 12: underwater bolts also test the segment midpoint (long frames must not tunnel past a belly)
+    if (!inBoat(bt, b.p, 0.3) && !(under && inBoat(bt, NB_MID.lerpVectors(b.q, b.p, 0.5), 0.3) && b.p.copy(NB_MID))) continue;
     if (under && b.p.y < 0.2) hitBoat(bt, b.p);
     else if (!under && b.p.y > -0.3) ricochet(bt, b.p, b.d);
     else continue;
@@ -1527,6 +1685,60 @@ function shipHitsBoat(bt) {
   hitCargo(9 + G.speed * 0.06, V1.copy(shipPos).addScaledVector(shipFwd, 4).clone());
 }
 
+// ---- round 12: close-range punish. Skimming over / past a boat above water (≤ ~40 m) without diving draws a heavy
+// point-blank burst. Telegraph: the aim laser sweeps onto the ship for 0.65 s (thin, flickering), freezing on a lock
+// line for the last 0.2 s (thick, solid) — then 5 heavy bolts go down that line (forward-led, so only a sideways /
+// vertical jink or a dive escapes). Diving at any point before the burst cancels it.
+// 5 × 24 = 120 damage: the full shield plus ~20 % hull — never a kill from full health.
+const PUN_R = 40, PUN_TELE = 0.65, PUN_LOCK = 0.2, PUN_N = 5, PUN_DT = 0.07, PUN_DMG = 24, PUN_SPEED = 190, PUN_CD = 4;
+const PUN_COL = [2.6, 0.35, 0.2];
+const PUN = { log: [], tele: 0, dodgedDive: 0, bursts: 0, hits: 0, dmg: 0 };
+const PUN_AIM = new THREE.Vector3();
+function punishAim(b, out) {
+  const tf = b.gun.distanceTo(shipPos) / PUN_SPEED;
+  return toWorld(G.s + G.speed * (1 - G.dip) * tf, b.punLat, b.punY, out);
+}
+function updatePunish(b, dt, time) {
+  b.punCd = (b.punCd || 0) - dt;
+  if (G.phase !== 'flight') { b.pun = 'idle'; return; }
+  if (!b.pun || b.pun === 'idle') {
+    b.pun = 'idle';
+    if (b.punCd > 0 || G.dive || G.underwater || G.y < 0.3 || (b === TUT.boat && TUT.hold)) return;
+    if (b.deck.distanceTo(shipPos) > PUN_R || !viewLOS(b.gun, shipPos, b.s)) return;
+    b.pun = 'tele'; b.punT = PUN_TELE; PUN.tele++;
+    b.punRec = { i: BOATS.indexOf(b), teleAt: +G.t.toFixed(3), fireAt: null, dodged: null, shots: 0, hits: 0, dmg: 0, dist: +b.deck.distanceTo(shipPos).toFixed(1) };
+    PUN.log.push(b.punRec); if (PUN.log.length > 60) PUN.log.shift();
+    audio.punishAlarm(panOf(b.gun));
+    showMsg('POINT-BLANK — DIVE OR JINK!', 'В УПОР — НЫРЯЙ ИЛИ УХОДИ!', 0.9, '#ff7a5a');
+  }
+  threat(b, b.deck);
+  if (b.pun === 'tele') {
+    b.punT -= dt;
+    if (G.dive || G.underwater) { b.pun = 'idle'; b.punCd = PUN_CD; b.punRec.dodged = 'dive'; PUN.dodgedDive++; return; }
+    const locked = b.punT <= PUN_LOCK;
+    if (!locked) { b.punLat = G.lat; b.punY = Math.max(1.2, G.y); }
+    punishAim(b, PUN_AIM);
+    const fl = locked ? 1 : 0.55 + 0.45 * Math.sin(time * 70);
+    beams.add(b.gun.x, b.gun.y, b.gun.z, PUN_AIM.x, PUN_AIM.y, PUN_AIM.z, locked ? 0.42 : 0.2, PUN_COL[0], PUN_COL[1], PUN_COL[2], fl);
+    glows.add(b.gun.x, b.gun.y, b.gun.z, 2.6, 0.4, 0.2, 0.8 + 0.2 * Math.sin(time * 40), locked ? 6 : 4);
+    glows.add(PUN_AIM.x, PUN_AIM.y, PUN_AIM.z, 2.4, 0.35, 0.15, locked ? 0.9 : 0.5, locked ? 4 : 2.5);
+    if (b.punT <= 0) { b.pun = 'burst'; b.punShots = 0; b.punFt = 0; b.punRec.fireAt = +G.t.toFixed(3); PUN.bursts++; }
+    return;
+  }
+  // burst
+  b.punFt -= dt;
+  if (b.punFt > 0) return;
+  punishAim(b, PUN_AIM);
+  const eb = enemyBolt(b.gun, PUN_AIM, b.s, PUN_SPEED, PUN_COL, PUN_DMG, 2.6, 'punish', false, 1.2);
+  if (eb) eb.punRec = b.punRec;
+  b.punRec.shots++;
+  sparks.emit(b.gun.x, b.gun.y, b.gun.z, 0, 0, 0, 0.1, 5, 3, 2.6, 0.5, 0.2, 1);
+  lightFlash(b.gun, 180, 0.1, 1, 0.35, 0.2);
+  audio.turretShot(panOf(b.gun) * 0.8);
+  b.punFt = PUN_DT;
+  if (++b.punShots >= PUN_N) { b.pun = 'idle'; b.punCd = PUN_CD; }
+}
+
 function updateNaval(dt, time) {
   const flying = G.phase === 'flight' || G.phase === 'landing';
   const sub = G.underwater && G.phase === 'flight';
@@ -1641,6 +1853,7 @@ function updateNaval(dt, time) {
   for (let i = 0; i < BOATS.length; i++) {
     const b = BOATS[i];
     for (const mesh of Object.values(boatFX)) mesh.setMatrixAt(i, ZERO_M);
+    boatUFX.under.setMatrixAt(i, ZERO_M); boatUFX.wash.setMatrixAt(i, ZERO_M);
     const pt = b.type === 'patrol';
     const mF = pt ? boatM.pF : boatM.sF, mB = pt ? boatM.pB : boatM.sB, oF = pt ? boatM.sF : boatM.pF, oB = pt ? boatM.sB : boatM.pB;
     oF.setMatrixAt(i, ZERO_M); oB.setMatrixAt(i, ZERO_M);
@@ -1696,6 +1909,19 @@ function updateNaval(dt, time) {
       M1.copy(b.M).multiply(M2.makeTranslation(0,4,-2)).multiply(M2.makeRotationY(sweep)).multiply(M2.makeRotationX(-0.10)).multiply(M2.makeScale(7,7,42)); boatFX.beam.setMatrixAt(i,M1);
       M1.copy(boatWaterM).multiply(M2.makeTranslation(-Math.sin(sweep)*35,0.24,-Math.cos(sweep)*35)).multiply(M2.makeScale(15,1,22)); boatFX.pool.setMatrixAt(i,M1);
     }
+    // round 12: the boat from below — light pooling + caustic ripples + wake turbulence, propeller wash (underwater camera only)
+    if (camUnder && b.deck.distanceTo(camera.position) < 200) {
+      M1.copy(boatWaterM).multiply(M2.makeTranslation(0, -0.3, 18)).multiply(M2.makeScale(44, 1, 80)); boatUFX.under.setMatrixAt(i, M1);
+      if (quality !== 'low') { M1.copy(boatWaterM).multiply(M2.makeTranslation(0, -0.95, 27)).multiply(M2.makeScale(10, 1, 40)); boatUFX.wash.setMatrixAt(i, M1); }
+      if (b.deck.distanceTo(camera.position) < 120) {
+        let nb = (quality === 'low' ? 8 : quality === 'med' ? 22 : 36) * dt;
+        while (nb > 0 && Math.random() < nb) {
+          nb -= 1;
+          V1.set((Math.random() - 0.5) * 2.4, -0.8 - Math.random() * 0.6, 7.3 + Math.random()).applyMatrix4(boatWaterM);
+          mist.emit(V1.x, V1.y, V1.z, (Math.random() - 0.5) * 3, 0.5 + Math.random() * 2, (Math.random() - 0.5) * 3, 1.4 + Math.random() * 1.2, 0.3, 1.1, 0.8, 1, 1, 0.7, -3, 1.4);
+        }
+      }
+    }
     if (b.deck.distanceTo(shipPos) < 400) {
       threat(b,b.deck);
       if (!b.heard) { b.heard=true; audio.boatApproach(panOf(b.deck)); }
@@ -1728,6 +1954,11 @@ function updateNaval(dt, time) {
     if (camUnder) {
       const c = BOAT_PANEL[b.type], pu = 0.6 + 0.4 * Math.sin(time * 5 + i) + (b.flashT > 0 ? 1 : 0);
       for (const z of [-1.4, 0.3, 2.0]) { P.set(0, BOAT_KEEL - 0.15, z).applyMatrix4(b.M); glows.add(P.x, P.y, P.z, c.r * 0.7, c.g * 0.7, c.b * 0.7, pu * 0.6, 2.6); }
+      // round 12: a stronger pulsing core on the weak spot (faster + brighter while the torpedo is locked on it)
+      const lk = TORP.target === b, beat = 0.5 + 0.5 * Math.sin(time * (lk ? 9 : 4.5) + i);
+      P.set(0, BOAT_KEEL - 0.3, 0.3).applyMatrix4(b.M);
+      glows.add(P.x, P.y, P.z, c.r * 0.55, c.g * 0.55, c.b * 0.55, (0.45 + 0.55 * beat) * (lk ? 1.3 : 0.9), 4.5 + 2.5 * beat);
+      glows.add(P.x, P.y, P.z, 1.6, 1.6, 1.5, 0.35 + 0.4 * beat, 1.4);
     }
     b.flashT -= dt;
     // bow wave / wake
@@ -1736,6 +1967,7 @@ function updateNaval(dt, time) {
       mist.emit(P.x, 0.3, P.z, (Math.random() - 0.5) * 3, 1.5 + Math.random() * 2, (Math.random() - 0.5) * 3, 0.9, 0.8, 2.6, 0.88, 0.95, 0.95, 0.55, 8, 0.6);
     }
     if (flying) shipHitsBoat(b);
+    updatePunish(b, dt, time);
     // Council patrol boats fire on a surfaced ship in range: telegraph (white/blue strobe on the gun) -> 3 dodgeable bolts
     if (!pt || G.phase !== 'flight') continue;
     const dS = b.gun.distanceTo(shipPos);
@@ -1766,6 +1998,10 @@ function updateNaval(dt, time) {
   for (const k of ['pF', 'pB', 'sF', 'sB', 'panels']) boatM[k].instanceMatrix.needsUpdate = true;
   boatFX.wake.material.uniforms.uTime.value = time;
   for (const mesh of Object.values(boatFX)) { mesh.instanceMatrix.needsUpdate=true; mesh.visible=quality!=='low'||mesh===boatFX.wake||mesh===boatFX.bow; }
+  boatUFX.under.instanceMatrix.needsUpdate = boatUFX.wash.instanceMatrix.needsUpdate = true;
+  boatUFX.under.visible = camUnder; boatUFX.wash.visible = camUnder && quality !== 'low';
+  boatUFX.under.material.uniforms.uTime.value = boatUFX.wash.material.uniforms.uTime.value = time;
+  boatMat.color.copy(camUnder ? HULL_UW : HULL_AIR);   // dark hull silhouette against the bright surface from below
   updateSpouts(dt);
   // first-encounter hints
   if (G.phase === 'flight') {
@@ -1777,7 +2013,7 @@ function updateNaval(dt, time) {
 function hint(kind) {
   if (kind === 'mine' && !G.mineHinted) { G.mineHinted = true; toast('<b>Mines below — shoot them or steer clear.</b><br><i>Мины под водой — сбей или обойди.</i>', 5); }
   if (kind === 'hunter' && !G.hunterHinted) { G.hunterHinted = true; toast('<b>Hunters live underwater — shoot them while diving.</b><br><i>Охотники только под водой — стреляй в нырке.</i>', 5); }
-  if (kind === 'boat' && !G.boatHinted) { G.boatHinted = true; toast('<b>Boats: hit from below — dive!</b><br><i>Бей снизу — ныряй!</i>', 5.5); }
+  if (kind === 'boat' && !G.boatHinted) { G.boatHinted = true; toast('<b>Boats: dive, then fire a torpedo [R]</b><br><i>Нырни и пускай торпеду [R]</i>', 5.5); }
 }
 
 // ------------------------------------------------------------------ off-screen threat indicator
@@ -2129,16 +2365,31 @@ function updateShipVisual(dt, time) {
 let fovCur = 68;
 const CAM_MARGIN = 5;
 let closeCam = null, cineCam = null, frozen = false;
+const UW_CAM_BLEND = 0.7, UW_CAM_BACK = 7, UW_CAM_UP = 3.6, UW_CAM_LOOK = 1.4;   // round 12 underwater camera offset
+// the extra pull-back never parks the camera behind a rock column in the river (it shrinks to stay in front of it)
+function uwCamBack() {
+  let back = UW_CAM_BACK;
+  for (const r of ROCKS) {
+    const ds = G.s - r.s;
+    if (ds <= 0 || ds > 24 + UW_CAM_BACK + r.r + 3 || Math.abs(r.lat - G.lat) > r.r + 5) continue;
+    back = Math.min(back, Math.max(0, ds - r.r - 3 - 24));
+  }
+  return back;
+}
 function updateCamera(dt, time) {
   const under = G.underwater;
   const start = G.phase === 'start';
   const wide = clamp((camera.aspect - 1.7) / 0.6, 0, 1);   // phones in landscape: a touch further
   // slightly tighter in the narrow slots so the near wall doesn't fill the frame
   G.camNarrow = (G.camNarrow || 0) + (narrowAt(G.s) - (G.camNarrow || 0)) * damp(1.5, dt);
-  const dist = (start ? 30 : 30 * (1 - 0.17 * G.camNarrow)) + G.boost * 2.6 - (under ? 6 : 0) + G.dip * 22;
+  // round 12: underwater only, the camera is raised and pulled back (blended in over ~0.7 s after the dive) so the ship
+  // covers less of the view; G.uwCam is 0 whenever the ship is not submerged, so the surface camera is untouched
+  G.uwCam = under ? Math.min(1, G.uwCam + dt / UW_CAM_BLEND) : 0;
+  const uwk = smoothstep(0, 1, G.uwCam);
+  const dist = (start ? 30 : 30 * (1 - 0.17 * G.camNarrow)) + G.boost * 2.6 - (under ? 6 - uwCamBack() * uwk : 0) + G.dip * 22;
   // round 4: underwater the camera drops ~3 m *below* the ship (looking up a little), so the ship no longer hides
   // mines / hunters at its own depth, and boat bellies + the Snell window show overhead (camera framing only)
-  const hgt = under ? -3.2 : (start ? 9 : 10.6 + wide * 0.6 + G.boost * 0.8);
+  const hgt = under ? -3.2 + UW_CAM_UP * uwk : (start ? 9 : 10.6 + wide * 0.6 + G.boost * 0.8);
   // behind the ship along its heading (start screen: slow cinematic orbit)
   const orbit = start ? 0.45 + Math.sin(time * 0.12) * 0.25 : 0;
   V1.set(-Math.sin(SF.th - G.yaw * 0.6 + orbit), 0, Math.cos(SF.th - G.yaw * 0.6 + orbit));
@@ -2177,7 +2428,7 @@ function updateCamera(dt, time) {
   camera.position.z += (Math.random() - 0.5) * sh;
   if (G.y < -0.6) camera.position.y = Math.min(camera.position.y, -0.4);   // shake never pops the camera out of the water
   camLook.copy(shipPos).addScaledVector(shipFwd, 40);
-  camLook.y = shipPos.y + (under ? 0.8 : 3.1);
+  camLook.y = shipPos.y + (under ? 0.8 + UW_CAM_LOOK * uwk : 3.1);
   if (start) {
     // frame the ship low in the gap between the title and the brief
     V3.copy(shipPos).sub(camPos); V3.y = 0; V3.normalize();
@@ -2321,8 +2572,8 @@ const TGT_LABEL = { turret: 'TURRET / ТУРЕЛЬ', drone: 'DRONE / ДРОН', 
 const TGT_R = { turret: 2.6, drone: 2.4, beacon: 2.2, mine: 1.8, hunter: 1.6, boat: 5, weak: 2.2 };
 const tgtEls = [], mtagEls = [];
 for (let i = 0; i < TGT_N; i++) {
-  const el = document.createElement('div'); el.className = 'tgt'; el.innerHTML = '<span></span>';
-  $('tgts').appendChild(el); tgtEls.push({ el, span: el.firstChild, label: '', aim: false, kind: '' });
+  const el = document.createElement('div'); el.className = 'tgt'; el.innerHTML = '<span></span><b class="hpb"><i></i></b>';
+  $('tgts').appendChild(el); tgtEls.push({ el, span: el.firstChild, hp: el.lastChild.firstChild, hpV: -1, label: '', aim: false, kind: '', torp: false });
 }
 for (let i = 0; i < 2; i++) {
   const el = document.createElement('div'); el.className = 'mtag'; el.innerHTML = '<span>DO NOT HIT / НЕ СТРЕЛЯТЬ</span>';
@@ -2336,7 +2587,7 @@ function updateMarkers(rdt) {
     const cp = camera.position;
     const range = camUnder ? TGT_RANGE_UW : TGT_RANGE;
     const add = (o, kind, p = o.wp, s = o.s) => {
-      const reach = kind === 'boat' ? 400 : range;
+      const reach = kind === 'boat' ? 400 : kind === 'weak' ? TORP_RANGE + 10 : range;   // round 12: boats stay bracketed through the murk out to torpedo range
       if (Math.abs(s - G.s) > reach + 30) return;
       const d = p.distanceTo(shipPos);
       if (d > reach || p.distanceTo(cp) < 8) return;
@@ -2361,9 +2612,11 @@ function updateMarkers(rdt) {
       toScreen(c.p, SCR2);
       if (!SCR2.on) continue;
       // line of sight (mines just under the surface are glimpsed through it from above)
-      if (!(c.kind === 'mine' && !camUnder) && !viewLOS(cp, c.p, G.s - 20)) continue;
+      if (!(c.kind === 'mine' && !camUnder) && !(c.kind === 'weak' && c.o === TORP.target) && !viewLOS(cp, c.p, G.s - 20)) continue;
       const dc = c.p.distanceTo(cp);
-      const size = c.kind === 'boat' ? clamp((TGT_R.boat * 2.6 * innerHeight) / (2 * dc * fy), 76, 130) : clamp((TGT_R[c.kind] * 2.2 * innerHeight) / (2 * dc * fy), 18, 54);
+      const torp = c.kind === 'weak' && c.o === TORP.target;
+      const size = c.kind === 'boat' ? clamp((TGT_R.boat * 2.6 * innerHeight) / (2 * dc * fy), 76, 130)
+        : torp ? clamp((TGT_R.weak * 3 * innerHeight) / (2 * dc * fy), 46, 90) : clamp((TGT_R[c.kind] * 2.2 * innerHeight) / (2 * dc * fy), 18, 54);
       const m = tgtEls[n++];
       // first sighting of each type gets a label for a few seconds; a boat's weak point is always labelled
       const seen = G.seen[c.kind];
@@ -2379,17 +2632,21 @@ function updateMarkers(rdt) {
         }
       }
       const label = c.kind === 'boat' ? `КАТЕР / BOAT · ${Math.round(c.d)} m${seen && seen.o === c.o && seen.t > 0 ? ' · ARMORED' : ''}`
-        : c.kind === 'weak' || (seen && seen.o === c.o && seen.t > 0) ? TGT_LABEL[c.kind] : '';
+        : torp ? `TORPEDO LOCK / ТОРПЕДА · ${Math.round(c.d)} m` : c.kind === 'weak' || (seen && seen.o === c.o && seen.t > 0) ? TGT_LABEL[c.kind] : '';
       if (label !== m.label) { m.label = label; m.span.textContent = label; }
       const aim = c.o === aimObj;
       if (aim !== m.aim) { m.aim = aim; m.el.classList.toggle('aim', aim); }
+      if (torp !== m.torp) { m.torp = torp; m.el.classList.toggle('torp', torp); }
+      // round 12: boat hull HP (a patrol boat shows the half a torpedo takes)
+      const hpV = c.kind === 'weak' || c.kind === 'boat' ? c.o.hp / BOAT_HP : -1;
+      if (hpV !== m.hpV) { m.hpV = hpV; m.el.classList.toggle('hp', hpV >= 0); if (hpV >= 0) m.hp.style.transform = `scaleX(${hpV})`; }
       if (c.kind !== m.kind) {
         m.el.classList.toggle('weak', c.kind === 'weak');
         m.el.classList.toggle('uwk', c.kind === 'mine' || c.kind === 'hunter');
         m.el.classList.toggle('boat', c.kind === 'boat');
         m.kind = c.kind;
       }
-      const alert = c.kind === 'boat' && c.o.fire !== 'idle';
+      const alert = c.kind === 'boat' && (c.o.fire !== 'idle' || c.o.pun === 'tele' || c.o.pun === 'burst');
       m.el.style.color = alert ? '#ff5544' : '';
       if (alert !== m.alert) { m.alert = alert; m.el.classList.toggle('alert', alert); }
       m.el.style.display = 'block';
@@ -2552,6 +2809,10 @@ function reset() {
   for (const b of bolts) b.on = false;
   for (const b of ebolts) b.on = false;
   for (const r of rockets) r.on = false;
+  for (const t of torps) t.on = false;
+  Object.assign(TORP, { target: null, lockT: 0, fired: 0, hits: 0, kills: 0, scuttled: 0, log: [] });
+  Object.assign(PUN, { log: [], tele: 0, dodgedDive: 0, bursts: 0, hits: 0, dmg: 0 });
+  hud.rocketBtn.classList.remove('pulse'); TUT.cueT = 0;
   ship.body.position.z = 0;
   sparks.clear(); mist.clear(); debris.clear(); wake.clear();
   placeStatic();
@@ -2713,6 +2974,7 @@ function updateTutorial(rdt) {
   if (!frozen && !T.frozen) T.t += rdt;
   if (!T.dived && (G.dive || G.underwater)) {
     T.dived = true;
+    if (T.boat) T.cueT = TUT_CUE;   // round 12: step 2 — once submerged with a lock, pulse ROCKET (torpedo)
     T.outAt = Math.min(T.outAt, Math.max(T.t, TUT_EASE));   // diving ends the slow-mo early
     if (T.boat) audio.beep(1320);
   }
@@ -2724,6 +2986,20 @@ function updateTutorial(rdt) {
   const promptOn = !T.dived && T.t < TUT_PROMPT;
   if (!promptOn && hud.tut.classList.contains('on')) { hud.tut.classList.remove('on'); hud.dive.classList.remove('pulse'); }
   if (!promptOn && T.t > T.outAt + TUT_EASE) endTutorial();
+}
+// round 12: tutorial step 2. After the dive the big prompt goes (as in round 11); while submerged with a torpedo lock the
+// ROCKET button pulses (touch and the desktop key strip) until a torpedo is fired or ~7 s pass.
+function updateTorpCue(rdt) {
+  if (TUT.cueT > 0 && !frozen) TUT.cueT -= rdt;
+  const on = TUT.cueT > 0 && G.phase === 'flight' && G.underwater && !!TORP.target && G.rockets > 0;
+  if (on) TUT.cueSeen = true;
+  if (on !== hud.rocketBtn.classList.contains('pulse')) hud.rocketBtn.classList.toggle('pulse', on);
+}
+// round 12: the autopilot dives under a boat close ahead (as the tutorial teaches) through its existing dive timer
+function apBoatDive() {
+  if (G.air < 14) return;
+  for (const b of BOATS) if (b.alive && b.s - G.s > -25 && b.s - G.s < 170 && Math.abs(b.lat - G.lat) < 45) { G.apDiveT = Math.max(G.apDiveT, 1.4); return; }
+  for (const b of BOATS) if (b.pun === 'tele') { G.apDiveT = Math.max(G.apDiveT, 1.4); return; }
 }
 function startTutorial(b, d) {
   Object.assign(TUT, { phase: 'active', t: 0, boat: b, hold: true, dist: d, dived: false, outAt: TUT_EASE + TUT_HOLD, minScale: 1,
@@ -2775,6 +3051,7 @@ function loop() {
 
   glows.begin();
   beams.begin();
+  if (AUTOPILOT && G.phase === 'flight') apBoatDive();
   updateFlight(dt);
   updateShipVisual(dt, time);
   autoFire = false;
@@ -2788,10 +3065,16 @@ function loop() {
     if (G.underwater && aimObj) autoFire = true;
     input.fire = autoFire;
   }
+  updateTorpedoLock(realDt);
+  // round 12: the autopilot sends one torpedo at a time at the locked boat
+  if (AUTOPILOT && G.phase === 'flight' && TORP.target && TORP.lockT > 0.15 && G.rockets > 0 && G.rocketCd <= 0 && !torps.some((t) => t.on && t.target === TORP.target)) input.rocketPressed = true;
   if (G.phase === 'flight' && input.fire && G.fireCd <= 0) fire();
-  if (input.consumeRocket() && G.phase === 'flight') { if (G.underwater) audio.empty(); else fireRocket(); }
+  // round 12: ROCKET while submerged launches a homing torpedo (it used to be a dry click)
+  if (input.consumeRocket() && G.phase === 'flight') { if (G.underwater) fireTorpedo(); else fireRocket(); }
+  updateTorpCue(realDt);
   updateBolts(dt);
   updateRockets(dt);
+  updateTorpedoes(dt);
   updateTargets(dt, time);
   updateLethe(dt, time);
   updateNaval(dt, time);
@@ -2892,6 +3175,13 @@ window.__lethe = {
       divePulse: hud.dive.classList.contains('pulse'), hold: TUT.hold, dived: TUT.dived, dist: +TUT.dist.toFixed(1), count: TUT.count, boat: BOATS.indexOf(TUT.boat),
       triggerAt: TUT.triggerAt, releaseAt: TUT.releaseAt, triggerS: TUT.triggerS, tips: tipsOn, seen: lsGet(TUT_KEY) === '1', armed: tutArmed() },
     timeScale: +timeScale.toFixed(3),
+    // round 12
+    dmgTaken: +G.dmgTaken.toFixed(1), uwCam: +G.uwCam.toFixed(3), camUnder,
+    torpedo: { lock: !!TORP.target, target: BOATS.indexOf(TORP.target), lockT: +TORP.lockT.toFixed(2), dist: TORP.target ? +TORP.target.wp.distanceTo(shipPos).toFixed(1) : null,
+      fired: TORP.fired, hits: TORP.hits, kills: TORP.kills, scuttled: TORP.scuttled, inFlight: torps.filter((t) => t.on).length,
+      bracket: tgtEls.some((m) => m.torp && m.el.style.display === 'block'), cue: TUT.cueT > 0, cueSeen: TUT.cueSeen, rocketPulse: hud.rocketBtn.classList.contains('pulse') },
+    punish: { tele: PUN.tele, bursts: PUN.bursts, dodgedDive: PUN.dodgedDive, hits: PUN.hits, dmg: PUN.dmg, active: BOATS.filter((b) => b.pun === 'tele' || b.pun === 'burst').length },
+    fog: { density: scene.fog.density, color: scene.fog.color.toArray().map((x) => +x.toFixed(4)) },
   }),
   start: startGame,
   retry: () => { reset(); startGame(); },
@@ -2931,13 +3221,25 @@ window.__lethe = {
     spawnBoat: (ahead = 80, lat = null, type = 'patrol', speed = 0) => {
       const b = BOATS.find((x) => x.debug && !x.alive) || BOATS[BOATS.length - 1];
       const l = lat === null ? G.lat : lat;
-      Object.assign(b, { s: G.s + ahead, home: G.s + ahead, lat: l, lat0: l, type, dir: 1, dir0: 1, speed, alive: true, hp: BOAT_HP, head: 0, sinkT: 0, cd: 1, fire: 'idle', easy: false });
+      Object.assign(b, { s: G.s + ahead, home: G.s + ahead, lat: l, lat0: l, type, dir: 1, dir0: 1, speed, alive: true, hp: BOAT_HP, head: 0, sinkT: 0, cd: 1, fire: 'idle', easy: false, pun: 'idle', punCd: 0 });
       toWorld(b.s, b.lat, BOAT_KEEL - 0.05, b.wp); toWorld(b.s, b.lat, 2.4, b.deck);
       boatM.panels.setColorAt(BOATS.indexOf(b), BOAT_PANEL[type]); boatM.panels.instanceColor.needsUpdate = true;
       return BOATS.indexOf(b);
     },
     boatSignals: () => BOATS.filter(b=>b.alive&&b.lightEnd>b.lightStart).map(b=>({type:b.type,lights:Array.from({length:b.lightEnd-b.lightStart},(_,j)=>({rgb:Array.from(glows.col.slice((b.lightStart+j)*4,(b.lightStart+j)*4+3)),size:glows.size[b.lightStart+j]}))})),
     boatShotLog: () => boatShotLog,
+    // round 12: torpedoes, punish, underwater FX / camera probes
+    torpedoes: () => torps.filter((t) => t.on).map((t) => ({ s: +t.s.toFixed(1), lat: +t.lat.toFixed(2), y: +t.y.toFixed(2), target: BOATS.indexOf(t.target), age: +t.age.toFixed(2) })),
+    torpLog: () => TORP.log,
+    torpCand: () => BOATS.filter((b) => b.alive).map((b) => { const ds = b.s - G.s, dl = b.lat - G.lat, head = Math.atan2(G.vLat, Math.max(1, G.speed));
+      return { i: BOATS.indexOf(b), ds: +ds.toFixed(1), dl: +dl.toFixed(1), d: +Math.hypot(ds, dl, b.wp.y - shipPos.y).toFixed(1), off: +((Math.atan2(dl, ds) - head) / DEG).toFixed(1) }; }),
+    fireTorpedo: () => { const before = TORP.fired; if (G.underwater) fireTorpedo(); return TORP.fired > before; },
+    punishLog: () => PUN.log,
+    fogConsts: () => ({ water: FOG_WATER.toArray(), dWater: FOG_D_WATER, air: FOG_AIR.toArray(), dAir: FOG_D_AIR }),
+    underFX: () => ({ underVisible: boatUFX.under.visible, washVisible: boatUFX.wash.visible, hull: boatMat.color.toArray(),
+      instances: BOATS.map((b, i) => { boatUFX.under.getMatrixAt(i, M1); const u = M1.elements[0] !== 0; boatUFX.wash.getMatrixAt(i, M1); return { under: u, wash: M1.elements[0] !== 0 }; }),
+      particles: mist.n }),
+    camOffset: () => ({ pitch: +G.pitch.toFixed(3), uwCam: +G.uwCam.toFixed(3), camDist: +camera.position.distanceTo(shipPos).toFixed(2), dy: +(camera.position.y - shipPos.y).toFixed(2), cam: camera.position.toArray(), ship: shipPos.toArray() }),
     boatHinted: () => G.boatHinted,
     // round 11 tutorial: trigger on boat i (default: nearest alive boat ahead, debug boats included), freeze its clock, re-arm
     tutorial: (i = null) => {

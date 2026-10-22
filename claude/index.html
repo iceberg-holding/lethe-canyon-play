@@ -107,6 +107,13 @@
   #tut svg .b{stroke:#ffe2c2;stroke-width:1.8;fill:rgba(255,205,160,.35)}
   #tut svg .p{stroke:#8ff4ea;stroke-width:2.4;stroke-dasharray:5 4;animation:tutPath 1.1s linear infinite}
   #tut svg .u,#tut svg .uh{stroke:#ffb15e;stroke-width:2.6;animation:tutUp .8s ease-in-out infinite}
+  #tut svg .dn,#tut svg .dnh{stroke:#8ff4ea;stroke-width:2.2;animation:tutDown .8s ease-in-out infinite}
+  #tut svg .tp{stroke:#ffb15e;stroke-width:2.6;stroke-dasharray:7 4;animation:tutPath .7s linear infinite}
+  #tut svg .th{fill:#ffb15e;stroke:none}
+  #tut svg .wk{fill:#ffd2a0;stroke:#ff8a3a;stroke-width:1.4;animation:tutWk .6s ease-in-out infinite alternate}
+  #tut .tl kbd{font-size:.62em;vertical-align:.18em;padding:0 .35em}
+  @keyframes tutDown{0%,100%{transform:translateY(-2px);opacity:.6}50%{transform:translateY(2px);opacity:1}}
+  @keyframes tutWk{from{opacity:.55}to{opacity:1}}
   @keyframes tutPath{to{stroke-dashoffset:-18}}
   @keyframes tutUp{0%,100%{transform:translateY(2px);opacity:.6}50%{transform:translateY(-2px);opacity:1}}
   @keyframes tutKey{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
@@ -119,6 +126,12 @@
   @keyframes diveRing{0%{transform:scale(.95);opacity:1}100%{transform:scale(1.75);opacity:0}}
   body:not(.touch) #btnDive.pulse::after,body:not(.touch) #btnDive.pulse::before{animation-name:diveRingD}
   @keyframes diveRingD{0%{transform:scale(1);opacity:1}100%{transform:scale(1.18,1.6);opacity:0}}
+  /* round 12: tutorial step 2 — ROCKET (torpedo) pulses once submerged with a lock */
+  #btnRocket.pulse{border-color:#ffc070;border-width:2px;background:rgba(255,150,50,.38);animation:rkGlow .8s ease-in-out infinite}
+  #btnRocket.pulse::after,#btnRocket.pulse::before{content:"";position:absolute;inset:-4px;border-radius:inherit;border:2px solid rgba(255,190,110,.95);animation:diveRing 1.1s ease-out infinite;pointer-events:none}
+  #btnRocket.pulse::before{animation-delay:.55s}
+  body:not(.touch) #btnRocket.pulse::after,body:not(.touch) #btnRocket.pulse::before{animation-name:diveRingD}
+  @keyframes rkGlow{0%,100%{box-shadow:0 0 10px rgba(255,170,80,.5)}50%{box-shadow:0 0 28px rgba(255,170,80,.95)}}
   @keyframes diveGlow{0%,100%{box-shadow:0 0 10px rgba(120,255,235,.5)}50%{box-shadow:0 0 28px rgba(120,255,235,.95)}}
   #pop{position:absolute;left:50%;top:calc(max(calc(118px + var(--st)),21%) + 62px);transform:translate(-50%,-50%);font-size:13px;font-weight:500;letter-spacing:.2em;color:#ffd9a8;opacity:0;white-space:nowrap}
   #reticle{position:absolute;left:0;top:0;width:30px;height:30px;margin:-15px 0 0 -15px;border:1px solid rgba(255,230,190,.55);border-radius:50%}
@@ -203,6 +216,15 @@
   .tgt.weak::before,.tgt.weak::after{border-width:2px;border-color:#ffb36b;filter:drop-shadow(0 0 4px rgba(255,170,80,.9))}
   .tgt.weak span{color:#ffd2a0;font-weight:600}
   @keyframes weak{from{opacity:.65}to{opacity:1}}
+  /* round 12: torpedo lock on the belly (pulses) + boat hull HP bar */
+  .tgt.torp{color:#ff8a3a;animation:torpLock .42s ease-in-out infinite alternate}
+  .tgt.torp::before,.tgt.torp::after{border-width:2.5px;border-color:#ff8a3a;filter:drop-shadow(0 0 5px rgba(255,120,50,.95))}
+  .tgt.torp span{color:#ffe0c0;font-size:11.5px;font-weight:700;letter-spacing:.14em;margin-top:6px;padding:1px 7px;background:rgba(40,12,4,.6);border:1px solid #ff8a3a;text-shadow:0 1px 2px #000}
+  @keyframes torpLock{from{opacity:.7;scale:1.08}to{opacity:1;scale:.96}}
+  .tgt .hpb{display:none;position:absolute;left:18%;right:18%;top:-8px;height:3px;background:rgba(0,0,0,.55);border:1px solid rgba(0,0,0,.4)}
+  .tgt.hp .hpb{display:block}
+  .tgt .hpb i{display:block;height:100%;background:#ffb36b;transform-origin:0 50%}
+  .tgt.boat .hpb i{background:currentColor}
   .armor{position:absolute;left:0;top:0;transform:translate(-50%,-50%);font-size:10px;font-weight:600;letter-spacing:.2em;color:#e8f0ff;white-space:nowrap;
     text-shadow:0 0 6px rgba(140,180,255,.9),0 1px 2px #000;opacity:0;pointer-events:none}
   .armor.on{animation:armor .8s ease-out}
@@ -332,18 +354,20 @@
   <div id="pop"></div>
   <div id="toast"></div>
   <div id="tut">
-    <div class="tl">Катер впереди — ныряй!</div>
-    <div class="te">BOAT AHEAD — DIVE!</div>
+    <div class="tl">Нырни и пускай торпеду <kbd class="dk">R</kbd></div>
+    <div class="te">DIVE, THEN FIRE A TORPEDO <span class="dk">[R]</span></div>
     <div class="tr">
       <svg viewBox="0 0 132 44" aria-hidden="true">
-        <path class="w" d="M2 17H130"/>
-        <path class="b" d="M70 17h40l-5 7H76zM80 17v-7h16l4 7"/>
-        <path class="p" d="M4 7C22 7 32 16 42 27S62 38 76 37"/>
-        <path class="u" d="M90 40V28"/><path class="uh" d="M85 32l5-6 5 6"/>
+        <path class="w" d="M2 13H130"/>
+        <path class="b" d="M84 13h40l-5 7H89zM94 13v-7h16l4 7"/>
+        <path class="p" d="M4 5C14 5 19 10 23 19S30 33 40 33"/>
+        <path class="dn" d="M10 22v9"/><path class="dnh" d="M6.5 27.5l3.5 4 3.5-4"/>
+        <path class="tp" d="M44 33C62 33 80 31 99 22"/><path class="th" d="M92 20.5l8.5 0.8-4.6 7.2z"/>
+        <circle class="wk" cx="104" cy="20.5" r="2.6"/>
       </svg>
       <div class="tx">
-        <div class="tk"><span class="dk">Press <kbd>E</kbd> to dive <i>· жми <kbd>E</kbd></i></span><span class="tt">Tap <b>DIVE</b> ↘ <i>· жми НЫРОК</i></span></div>
-        <div class="tc">dive under ↓, shoot up ↑<i>нырни под него и бей снизу</i></div>
+        <div class="tk"><span class="dk"><kbd>E</kbd> dive, then <kbd>R</kbd> torpedo <i>· жми E, затем R</i></span><span class="tt">Tap <b>DIVE</b>, then <b>ROCKET</b> <i>· НЫРОК, затем РАКЕТА</i></span></div>
+        <div class="tc">dive ↓, then torpedo → boat<i>нырни ↓, затем торпеда → катер</i></div>
       </div>
     </div>
   </div>

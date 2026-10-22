@@ -425,4 +425,26 @@ export class Audio {
     this.noiseHit('lowpass', 2400, 0.7, 0.18, 0.9, 260, { ui: true, raw: true, attack: 0.05, delay: 0.5 });
   }
   empty() { this.tone('square', 220, 200, 0.04, 0.06, 0, { ui: true }); }
+  // ---------------------------------------------------------------- round 12: torpedo + close-range punish
+  // launch: hull "thunk" + compressed-air bubble gurgle, then a ~2.4 s receding propeller whirr (tremolo, falling lowpass)
+  torpedo() {
+    if (!this.ctx) return;
+    this.duck(0.55, 0.4);
+    this.tone('sine', 120, 38, 0.7, 0.32, 0, { verb: 0.3, attack: 0.003 });
+    this.tone('triangle', 70, 30, 0.35, 0.45, 0.01);
+    this.noiseHit('lowpass', 700, 2.5, 0.45, 0.5, 160, { verb: 0.3, attack: 0.01 });
+    for (let i = 0; i < 9; i++) this.tone('sine', 380 + Math.random() * 520, 900 + Math.random() * 700, 0.05, 0.05 + Math.random() * 0.05, 0.04 + i * 0.035 + Math.random() * 0.02, { attack: 0.003 });
+    const c = this.ctx, t = c.currentTime + 0.12, dur = 2.4, k = this.pitch;
+    const osc = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain(), trem = c.createOscillator(), tg = c.createGain();
+    osc.type = 'sawtooth'; osc.frequency.setValueAtTime(95 * k, t); osc.frequency.exponentialRampToValueAtTime(210 * k, t + 0.5); osc.frequency.exponentialRampToValueAtTime(170 * k, t + dur);
+    lp.type = 'lowpass'; lp.Q.value = 4; lp.frequency.setValueAtTime(900, t); lp.frequency.exponentialRampToValueAtTime(260, t + dur);
+    trem.frequency.value = 22; tg.gain.value = 0.5; trem.connect(tg); tg.connect(g.gain);
+    osc.connect(lp); lp.connect(g); this.route(g, { verb: 0.25 });
+    this.env(g, t, 0.15, 0.12, dur);
+    osc.start(t); trem.start(t); osc.stop(t + dur + 0.1); trem.stop(t + dur + 0.1);
+  }
+  // lock acquired: two short sonar-ish pings on the UI bus
+  torpedoLock() { if (this.ctx) { this.tone('sine', 1180, 1180, 0.06, 0.09, 0, { ui: true }); this.tone('sine', 1570, 1570, 0.06, 0.12, 0.1, { ui: true }); } }
+  // close-range punish telegraph: rising siren on the boat
+  punishAlarm(pan = 0) { if (this.ctx) { this.tone('sawtooth', 380, 1250, 0.06, 0.55, 0, { pan, attack: 0.02 }); this.tone('square', 760, 2500, 0.025, 0.55, 0, { pan, attack: 0.02 }); } }
 }
