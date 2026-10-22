@@ -130,3 +130,28 @@ export function shipTextures(S = 512) {
   const rough = toTex(cr);
   return { map, rough, bump: map };
 }
+
+// Shared colonial concrete atlas, generated once. Albedo and tangent normal share cracks / aggregate.
+export function colonialTextures(S = 512) {
+  const cv = canvas(S), c = cv.getContext('2d'), im = c.createImageData(S,S);
+  for(let y=0;y<S;y++) for(let x=0;x<S;x++) {
+    const k=(y*S+x)*4, n=hash2(x,y), v=175+n*35+pnoise(x/28,y/28,19,19)*14;
+    im.data.set([v,v*0.95,v*0.85,255],k);
+  }
+  c.putImageData(im,0,0);
+  for(let i=0;i<42;i++) {
+    const x=hash2(i,19)*S,y=hash2(i,29)*S,w=2+hash2(i,44)*12;
+    const g=c.createLinearGradient(0,y,0,Math.min(S,y+190));
+    g.addColorStop(0,'rgba(97,48,22,0.55)');g.addColorStop(1,'rgba(97,48,22,0)');
+    c.fillStyle=g;c.fillRect(x,y,w,190);
+  }
+  c.strokeStyle='rgba(40,37,30,0.65)';c.lineWidth=1.5;
+  for(let i=0;i<16;i++) {let x=hash2(i,71)*S,y=hash2(i,22)*S;c.beginPath();c.moveTo(x,y);
+    for(let j=0;j<8;j++){x+=(hash2(i,j)-0.5)*21;y+=8+hash2(j,i)*13;c.lineTo(x,y);}c.stroke();}
+  c.fillStyle='rgba(48,53,47,0.6)';c.font='bold 56px monospace';c.fillText('MH / 04',28,95);
+  c.fillStyle='rgba(223,190,117,0.6)';c.fillRect(32,107,215,8);
+  const pix=c.getImageData(0,0,S,S).data, nc=canvas(S),ctx=nc.getContext('2d'), ni=ctx.createImageData(S,S);
+  const lum=(x,y)=>pix[(((y+S)%S)*S+(x+S)%S)*4];
+  for(let y=0;y<S;y++)for(let x=0;x<S;x++){const k=(y*S+x)*4;ni.data.set([128+(lum(x-1,y)-lum(x+1,y))*0.8,128+(lum(x,y-1)-lum(x,y+1))*0.8,250,255],k);}
+  ctx.putImageData(ni,0,0);return {map:toTex(cv),normalMap:toTex(nc)};
+}

@@ -291,7 +291,7 @@ void main(){
   vec3 p = mod(aBase + drift - uCenter, uBox) - uBox * 0.5 + uCenter;
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   float d = length(mv.xyz);
-  vA = smoothstep(1.5, 6.0, d) * (1.0 - smoothstep(uBox * 0.3, uBox * 0.5, d)) * (0.5 + 0.5 * sin(uTime * 2.0 + aSeed * 40.0));
+  vA = smoothstep(1.5, 6.0, d) * (1.0 - smoothstep(uBox * 0.3, uBox * 0.5, d)) * (0.28 + 0.72 * pow(0.5 + 0.5 * sin(uTime * 1.2 + aSeed * 40.0), 5.0));
   gl_PointSize = clamp(0.09 * uScale / max(-mv.z, 0.5), 1.0, 6.0);
   gl_Position = projectionMatrix * mv;
 }`;
@@ -333,7 +333,8 @@ float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
 void main(){
   float x = abs(vQ.x), age = vQ.y;
   float n = vn(vec2(vQ.x * 7.0, age * 22.0 - uTime * 2.0)) * 0.6 + vn(vec2(vQ.x * 19.0, age * 50.0)) * 0.4;
-  float edges = smoothstep(0.55, 0.92, x) * smoothstep(1.0, 0.9, x);
+  float edges = smoothstep(0.48, 0.78, x) * smoothstep(1.0, 0.88, x);
+  edges *= 0.65 + 0.35 * sin(age * 110.0 - uTime * 5.0 + n * 4.0);
   float centre = smoothstep(0.35, 0.0, x) * (1.0 - age) * 0.8;
   float a = (edges + centre) * smoothstep(0.25, 0.65, n + 0.2) * (1.0 - age) * vK;
   gl_FragColor = vec4(vec3(0.9, 0.95, 0.93), clamp(a, 0.0, 1.0) * 0.75 * vFog);
@@ -358,7 +359,7 @@ export class Wake {
     this.obj = new THREE.Mesh(g, this.mat);
     this.obj.frustumCulled = false;
     this.obj.renderOrder = 2;
-    this.life = 1.6;
+    this.life = 2.1;
   }
   clear() { this.pts.length = 0; }
   // x,z = ship position, rx,rz = right vector, k = strength 0..1

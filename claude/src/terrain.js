@@ -6,7 +6,7 @@ import {
   S0, S_END, PAD_A, PAD_B, PAD_TOP, frame, toWorld, wallLat, riverHalf, rimH, basinF, bankY,
   ARCHES, ROCKS, ZONES, BEACONS, MASTS, TURRETS, DRESS, WRECK, TRIBS, archBottom, archTop,
 } from './world.js';
-import { rockTextures } from './textures.js';
+import { rockTextures, colonialTextures } from './textures.js';
 
 const SEC = 6;              // metres between cross sections
 const CH_SEC = 40;          // sections per chunk (240 m)
@@ -423,7 +423,10 @@ function addPipe(P, sA, sB) {
     const len = q0.distanceTo(q1);
     const m = new THREE.Matrix4().lookAt(q0, q1, _U).setPosition(q0.clone().add(q1).multiplyScalar(0.5));
     m.multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)).multiply(new THREE.Matrix4().makeScale(0.65, len + 0.05, 0.65));
-    P.geo(GEO.cyl8, m, pipeCol);
+    P.geo(GEO.cyl8, m, v => {
+      const rust=0.5+0.5*Math.sin(v.y*15+v.x*0.7+v.z*0.4);
+      return rust>0.68?[0.39,0.23,0.13]:pipeCol;
+    });
     if (s % 12 === 0) {
       const lat = pipeLat(s, y);
       const by = Math.max(0.5, bankY(s, lat));
@@ -527,7 +530,7 @@ function outerWall(s, y0, y1, ds, side) {
     for (let y = y0; y <= y1; y += 1) lat = Math.max(lat, wallLat(ss, y, side));
   return lat + 1;
 }
-function addColonial(P, E, sA, sB) {
+function addColonial(P, E, C, G, sA, sB) {
   for (let s = 2050; s <= 2230; s += 30) {
     if (s < sA || s >= sB) continue;
     for (const y of [26, 50]) {
@@ -539,19 +542,45 @@ function addColonial(P, E, sA, sB) {
         place(P, GEO.box, s + k * 7, lat - 4, y + 0.4, 13, 0.5, 1.8, [0.39, 0.45, 0.24]);
       }
       if (s % 60 === 10) {
-        place(P, GEO.box, s, lat - 8, y + 3, 8, 6, 10, [0.65, 0.63, 0.53]);
-        place(P, GEO.dome, s, lat - 8, y + 6, 5.5, 3, 6, [0.37, 0.57, 0.52]);
-        place(E, GEO.box, s - 5.1, lat - 8, y + 3.2, 0.08, 0.65, 6, [1.1, 0.77, 0.35]);
+        place(P, GEO.cyl, s, lat - 8, y + 0.8, 5.7, 1.6, 6.2, [0.53, 0.50, 0.41]);
+        place(G, GEO.dome, s, lat - 8, y + 1.6, 5.5, 7, 6, [0.37, 0.57, 0.52]);
+        // Ribbed greenhouse with latitude rails, base collar and planted silhouettes.
+        place(P, GEO.ring, s, lat-8, y+1.6, 5.65,0.35,6.15,[0.48,0.44,0.33]);
+        for(let a=0;a<Math.PI*2;a+=Math.PI/6) for(let j=0;j<6;j++){
+          const t=(j+0.5)/6*Math.PI/2, dt=Math.PI/12;
+          const q0=toWorld(s+Math.sin(a)*6*Math.cos(t-dt/2),lat-8+Math.cos(a)*5.5*Math.cos(t-dt/2),y+1.6+7*Math.sin(t-dt/2),new THREE.Vector3());
+          const q1=toWorld(s+Math.sin(a)*6*Math.cos(t+dt/2),lat-8+Math.cos(a)*5.5*Math.cos(t+dt/2),y+1.6+7*Math.sin(t+dt/2),new THREE.Vector3());
+          const m=new THREE.Matrix4().lookAt(q0,q1,_U).setPosition(q0.clone().add(q1).multiplyScalar(0.5));
+          m.multiply(new THREE.Matrix4().makeScale(0.12,0.12,q0.distanceTo(q1)*1.1));P.geo(GEO.box,m,[0.67,0.62,0.45]);
+        }
+        for(const t of [0.35,0.75,1.10]) {
+          const r=Math.cos(t);
+          place(P,GEO.ring,s,lat-8,y+1.6+7*Math.sin(t),5.5*r,0.10,6*r,[0.48,0.50,0.39]);
+        }
+        for(let j=0;j<5;j++){
+          place(P,GEO.cone,s-3+j*1.5,lat-8,y+3.2,0.8,3.0,0.65,[0.17,0.28,0.13]);
+          place(E,GEO.box,s-3+j*1.5,lat-8,y+2,0.25,0.12,0.25,[1.5,0.9,0.35]);
+        }
+        glowAt(s,lat-8,y+7,[1.0,0.65,0.25],4,-1);
+        place(P,GEO.box,s+12,lat-6,y+0.4,3,0.4,14,[0.39,0.37,0.30]);
+        place(E, GEO.box, s - 5.1, lat - 8, y + 1.8, 0.08, 0.35, 6, [1.1, 0.77, 0.35]);
       }
     }
   }
   for (let s = 4420; s <= 4550; s += 26) {
     if (s < sA || s >= sB) continue;
     const lat = -(outerWall(s, 32, 92, 13, -1) + 14), top = (s > 4510 ? 55 : 80) + hash2(s, 29) * 14;
-    place(P, GEO.box, s, lat, (34 + top) / 2, 13, top - 34, 22, [0.57, 0.52, 0.44]);
+    place(C, GEO.box, s, lat, (34 + top) / 2, 13, top - 34, 22, [0.57, 0.52, 0.44]);
     for (const ds of [-7, 5]) place(P, GEO.box, s + ds, lat + 6.6, (top + 34) / 2, 0.4, top - 34, 1.5, [0.36, 0.32, 0.27]);
     place(P, GEO.box, s, lat + 7, 54, 2, 4, 24, [0.30, 0.28, 0.26]);
-    place(P, GEO.box, s, lat, top + 1, 18, 2, 23, [0.71, 0.62, 0.48]);
+    for(let j=0;j<7;j++) {
+      place(P,GEO.cyl6,s-8+j*2.5,lat+3,top+1.4+hash2(s,j)*1.2,0.09,3+hash2(s,j)*2,0.09,[0.28,0.17,0.10],0,0,0.15);
+      place(C,GEO.ico0,s-8+j*2.5,lat+6,top-0.5,1.3,0.7+hash2(j,s),1,[0.65,0.59,0.48]);
+    }
+    for(const ds of [-7,0,7]) {
+      const chip=hash2(s,ds+41);
+      place(C,GEO.box,s+ds,lat,top+0.5+chip*0.6,16+chip*2,1+chip*1.6,5.6+chip,[0.71,0.62,0.48]);
+    }
     place(P, GEO.cyl8, s, lat + 8, 70, 1.7, 24, 1.7, [0.38, 0.29, 0.21], 0, Math.PI / 2);
     place(E, GEO.box, s - 10, lat + 7, top - 4, 0.12, 0.5, 5, [1.3, 0.46, 0.12]);
   }
@@ -567,25 +596,53 @@ function addFalls(grp, sA, sB) {
       for (const d of [-width / 2, width / 2]) {
         const ss = s + d, lat = outerWall(s, y - 1, y + 2, width / 2 + 1, 1) + 0.3;
         const p = toWorld(ss, lat, y, new THREE.Vector3());
-        B.v(p.x, p.y, p.z, 1, 1, 1, d / width + 0.5, y / 57);
+        B.v(p.x, p.y, p.z, 1, 1, 1, d / width + 0.5, (y - 3) / 57);
       }
     }
     for (let i = 0; i < rows; i++) { const a = i * 2; B.tri(a, a + 2, a + 1); B.tri(a + 1, a + 2, a + 3); }
     const mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      uniforms: { uTime: { value: 0 } },
-      vertexShader: `varying vec2 vUv; varying float vD; void main(){ vUv=uv; vec4 mv=modelViewMatrix*vec4(position,1.0); vD=-mv.z; gl_Position=projectionMatrix*mv; }`,
+      uniforms: { uTime: { value: 0 }, uFlowRight: { value: new THREE.Vector3(frame(s,F).tx,0,F.tz) } },
+      vertexShader: `uniform float uTime; uniform vec3 uFlowRight; varying vec2 vUv; varying float vD; void main(){ vUv=uv; vec3 p=position+uFlowRight*sin(uv.y*23.0+uTime*2.0)*(uv.x-0.5)*0.28; vec4 mv=modelViewMatrix*vec4(p,1.0); vD=-mv.z; gl_Position=projectionMatrix*mv; }`,
       fragmentShader: `uniform float uTime; varying vec2 vUv; varying float vD;
-      void main(){ float edge=smoothstep(0.0,0.18,vUv.x)*smoothstep(1.0,0.82,vUv.x);
-        float run=sin(vUv.x*37.0+sin(vUv.y*24.0+uTime*4.0)*1.4)*0.3+sin(vUv.x*81.0+vUv.y*17.0+uTime*3.0)*0.2+0.5;
-        float spray=pow(1.0-vUv.y,8.0);
-        float a=edge*(0.18+run*0.40+spray*0.3)*exp(-vD*vD*0.0000036);
-        gl_FragColor=vec4(mix(vec3(0.48,0.67,0.61),vec3(0.88,0.88,0.74),run*0.6+spray*0.4),a); }`,
+      float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+      float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+1.0),f.x),f.y);}
+      void main(){
+        float y=clamp(vUv.y,0.0,1.0), t=uTime;
+        float x=vUv.x+sin(y*19.0+t*1.7)*0.018;
+        float edge=smoothstep(0.0,0.16,x)*smoothstep(1.0,0.84,x);
+        vec2 flow=vec2(x*13.0,y*8.0+t*2.8);
+        float broad=n(flow), fine=n(flow*vec2(3.7,2.1)+t*0.7), veil=n(flow*vec2(0.55,3.4)-t);
+        float streak=pow(n(vec2(x*61.0,y*2.0+t*3.0)),3.0)*fine;
+        float lip=smoothstep(0.91,0.99,y), impact=pow(1.0-y,7.0);
+        float density=0.04+smoothstep(0.18,0.82,broad)*0.62+fine*0.16+streak*0.36+lip*0.5+impact*0.3;
+        vec3 col=mix(vec3(0.26,0.44,0.40),vec3(0.94,0.88,0.71),clamp(broad*0.7+streak+lip+impact*0.5,0.0,1.0));
+        gl_FragColor=vec4(col,edge*density*(0.55+veil*0.45)*exp(-vD*vD*0.0000036)); }`,
     });
     const m = mk(B, mat); m.userData.detail = true; m.userData.highOnly = s === 7080;
     grp.add(m); FALLS.push(m);
-    const p = toWorld(s, wallLat(s, 3, 1) + 1, 3, new THREE.Vector3());
-    VENTS.push({ p, k: 0 });
+    // Impact pool is entirely behind the analytic wall, at the foot of the cascade.
+    const p = toWorld(s, outerWall(s, 2, 5, width * 1.4 + 1, 1) + width * 0.34, 3.1, new THREE.Vector3());
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(width * 2.8, width * 0.65), new THREE.ShaderMaterial({
+      transparent:true, depthWrite:false, side:THREE.DoubleSide,
+      uniforms:{uTime:{value:0}},
+      vertexShader:`varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader:`uniform float uTime; varying vec2 vUv;
+      float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+      float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+1.0),f.x),f.y);}
+      void main(){vec2 p=vUv*2.0-1.0;float r=length(p);
+        float churn=n(p*9.0+vec2(uTime*0.7,-uTime*0.4));
+        float bubbles=n(p*23.0-vec2(uTime,0.0));
+        float rings=pow(0.5+0.5*sin(r*32.0-uTime*4.0+churn*6.0),5.0);
+        float foam=smoothstep(0.46,0.78,churn)*0.55+rings*bubbles*0.45+pow(max(0.0,1.0-r),8.0)*0.4;
+        float edge=1.0-smoothstep(0.15,1.0,r+churn*0.12);
+        gl_FragColor=vec4(mix(vec3(0.13,0.28,0.24),vec3(0.86,0.83,0.69),foam),edge*(0.24+foam*0.65));}`
+    }));
+    frame(s,F);
+    pool.matrixAutoUpdate=false;
+    pool.matrix.makeBasis(new THREE.Vector3(F.tx,0,F.tz),new THREE.Vector3(F.rx,0,F.rz),_U).setPosition(p);
+    pool.userData.detail=true; pool.userData.highOnly=s===7080; grp.add(pool); FALLS.push(pool);
+    VENTS.push({ p, k: 0, waterfall:true, highOnly:s===7080 });
   }
 }
 
@@ -614,6 +671,20 @@ export function makeTerrainMaterial() {
   };
   return mat;
 }
+const concreteTex=colonialTextures();
+const concreteMat=new THREE.MeshLambertMaterial({vertexColors:true,map:concreteTex.map,normalMap:concreteTex.normalMap,normalScale:new THREE.Vector2(0.35,0.35)});
+const glassMat=new THREE.MeshLambertMaterial({vertexColors:true,transparent:true,opacity:0.48,depthWrite:false,side:THREE.DoubleSide,emissive:0x263a24});
+glassMat.onBeforeCompile=(sh)=>{
+  sh.vertexShader='varying vec3 vGlassP;\n'+sh.vertexShader;
+  sh.vertexShader=sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n vGlassP=position;');
+  sh.fragmentShader='varying vec3 vGlassP;\n'+sh.fragmentShader;
+  sh.fragmentShader=sh.fragmentShader.replace('#include <opaque_fragment>',`
+    float fr=pow(1.0-abs(dot(normal,normalize(vViewPosition))),3.0);
+    float dirt=sin(vGlassP.x*3.0+vGlassP.z*0.7)*sin(vGlassP.y*8.0);
+    outgoingLight+=vec3(0.24,0.33,0.27)*fr;
+    diffuseColor.a=0.22+fr*0.42+max(0.0,dirt)*0.12;
+    #include <opaque_fragment>`);
+};
 export const propMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 // Shared weathering keeps colonial concrete and metal from reading as clean boxes.
 propMat.onBeforeCompile = (shader) => {
@@ -644,7 +715,7 @@ export function buildChunks(scene, mat) {
   for (let c0 = 0; c0 < totalSec; c0 += CH_SEC) {
     const c1 = Math.min(c0 + CH_SEC, totalSec);
     const sA = S0 + c0 * SEC, sB = S0 + c1 * SEC;
-    const B = new Builder(), D = new Builder(), P = new Builder(), E = new Builder(), S = new Builder();
+    const B = new Builder(), D = new Builder(), P = new Builder(), E = new Builder(), S = new Builder(), C = new Builder(), G = new Builder();
     addTerrain(B, c0, c1);
     addSkyline(B, sA, sB);
     for (const r of ROCKS) if (r.s >= sA && r.s < sB && !r.wreck) addRock(B, r);
@@ -668,7 +739,7 @@ export function buildChunks(scene, mat) {
     addScree(D, sA, sB, R);
     addLichen(P, sA, sB, R);
     addPipe(P, sA, sB);
-    addColonial(P, E, sA, sB);
+    addColonial(P, E, C, G, sA, sB);
     for (const c of DRESS.cables) if (c.s >= sA && c.s < sB) addCable(P, c);
     for (const r of DRESS.ruins) if (r.s >= sA && r.s < sB) addRuin(P, r);
     for (const g of DRESS.signs) if (g.s >= sA && g.s < sB) addSign(P, E, g);
@@ -681,6 +752,9 @@ export function buildChunks(scene, mat) {
     grp.matrixAutoUpdate = false;
     grp.userData = { sA, sB };
     addFalls(grp, sA, sB);
+    for(const [builder, material] of [[C,concreteMat],[G,glassMat]]) {
+      const mesh=mk(builder,material);if(mesh){mesh.userData.detail=true;grp.add(mesh);}
+    }
     const base = mk(B, mat);
     dustLedges(base.geometry);
     base.receiveShadow = true;
@@ -767,7 +841,8 @@ void main(){
     float fn = vn(vec2(p.x * 1.3, p.y * 0.5 - t * 2.2)) * 0.6 + vn(vec2(p.x * 3.1, p.y * 1.7 - t * 3.0)) * 0.4;
     float foam = smoothstep(2.6, 0.0, edgeD + fn * 1.6 - 0.6);
     foam = max(foam, smoothstep(0.78, 0.95, fn) * smoothstep(5.0, 1.0, edgeD));
-    col = mix(col, vec3(0.9, 0.93, 0.9), foam * 0.85);
+    float lace = 0.65 + 0.35 * sin(fn * 29.0 + uTime * 2.0);
+    col = mix(col, vec3(0.9, 0.93, 0.86), foam * (0.7 + 0.2 * lace));
   } else {
     // seen from below: bright Snell window overhead, darker total reflection at grazing angles
     float up = clamp(-V.y, 0.0, 1.0);
@@ -844,7 +919,7 @@ void main(){
   float n = vn(vec2(vP.x * 28.0, vP.y * 3.0 - uTime * 1.8)) * 0.6 + vn(vec2(vP.x * 60.0 + 3.0, vP.y * 6.0 - uTime * 3.0)) * 0.4;
   float a = smoothstep(1.0, 0.0, vP.y + n * 0.5) * smoothstep(0.0, 0.05, vP.y);
   // trailing wake downstream (x≈0.75 = downstream direction)
-  a *= 0.75 + 0.5 * smoothstep(0.3, 0.0, abs(vP.x - 0.75));
+  a *= 0.6 + 0.4 * smoothstep(0.3, 0.75, n) + 0.5 * smoothstep(0.3, 0.0, abs(vP.x - 0.75));
   gl_FragColor = vec4(vec3(0.92, 0.96, 0.94), clamp(a, 0.0, 1.0) * 0.8 * vFog);
 }`;
 export function buildFoam(scene, fogD) {
@@ -885,24 +960,25 @@ export function buildFoam(scene, fogD) {
 // --------------------------------------------------------------- god-ray shafts from the mirror sun
 const shaftVS = /* glsl */`
 attribute vec3 aA; attribute vec3 aD; attribute vec4 aP; // aP: len, width, side, end
-uniform float uTime;
+uniform float uTime; uniform float uReach;
 varying float vSide; varying float vEnd; varying float vFade; varying float vK;
 void main(){
-  vec3 P = aA + aD * aP.x * aP.w;
+  vec3 P = aA + aD * aP.x * uReach * aP.w;
   vec3 toCam = cameraPosition - P;
   vec3 side = normalize(cross(aD, toCam));
   P += side * aP.y * aP.z * (0.55 + 0.45 * aP.w);
   vSide = aP.z; vEnd = aP.w;
   float d = length(toCam);
   vFade = smoothstep(18.0, 90.0, d) * (1.0 - smoothstep(500.0, 900.0, d));
-  vK = 0.65 + 0.35 * sin(uTime * 0.7 + aA.x * 0.05 + aA.z * 0.03);
+  vK = 0.82 + 0.18 * sin(uTime * 0.35 + aA.x * 0.05 + aA.z * 0.03);
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
 }`;
 const shaftFS = /* glsl */`
 uniform float uOp; uniform vec3 uCol;
 varying float vSide; varying float vEnd; varying float vFade; varying float vK;
 void main(){
-  float a = (1.0 - vSide * vSide) * smoothstep(0.0, 0.2, vEnd) * pow(1.0 - vEnd, 1.4) * vFade * vK;
+  float filament = 0.72 + 0.28 * pow(0.5 + 0.5 * sin(vSide * 27.0 + vEnd * 7.0), 3.0);
+  float a = filament * pow(1.0 - vSide * vSide, 2.0) * smoothstep(0.0, 0.2, vEnd) * pow(1.0 - vEnd, 1.4) * vFade * vK;
   gl_FragColor = vec4(uCol * a * uOp, 1.0);
 }`;
 export function buildShafts(scene, sun2) {
@@ -933,7 +1009,7 @@ export function buildShafts(scene, sun2) {
   g.setIndex(ix);
   const mat = new THREE.ShaderMaterial({
     vertexShader: shaftVS, fragmentShader: shaftFS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    uniforms: { uTime: { value: 0 }, uOp: { value: 0.085 }, uCol: { value: new THREE.Color(1.0, 0.93, 0.85) } },
+    uniforms: { uTime: { value: 0 }, uOp: { value: 0.085 }, uReach: { value: 1 }, uCol: { value: new THREE.Color(1.0, 0.93, 0.85) } },
   });
   const m = new THREE.Mesh(g, mat);
   m.frustumCulled = false;

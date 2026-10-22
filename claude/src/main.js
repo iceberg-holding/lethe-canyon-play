@@ -135,6 +135,8 @@ function applyQuality(name) {
   const T = TIERS[name];
   for (const c of chunks) for (const m of c.children) if (m.userData.detail) m.visible = T.detail && (!m.userData.highOnly || name === 'high');
   shafts.visible = T.name !== 'low';
+  shafts.material.uniforms.uOp.value = name === 'high' ? 0.26 : 0.065;
+  shafts.material.uniforms.uReach.value = name === 'high' ? 1.85 : 1;
   motes.obj.visible = T.name !== 'low';
   waterMat.uniforms.uGlint.value = T.glintK;
   scene.traverse((o) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.needsUpdate = true; }); });
@@ -210,7 +212,7 @@ const masts = new THREE.InstancedMesh(mastGeo, lambertVC, MASTS.length);
 scene.add(masts);
 
 // LETHE turret head (round 4: dark gunmetal, light edge trims + fresnel rim, big red eye; nose along -Z)
-const turretMat = rimMaterial([1.0, 0.8, 0.6], 0.75);
+const turretMat = rimMaterial([0.55, 0.87, 1.0], 1.25);
 const turrets = new THREE.InstancedMesh(buildTurretGeo(), turretMat, TURRETS.length);
 turrets.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 turrets.frustumCulled = false;
@@ -450,7 +452,7 @@ function surfaceHit(p) {
 function splash(p, n = 90, strength = 1) {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * 6.28, r = Math.random();
-    const v = (4 + r * 10) * strength;
+    const v = (5 + r * 13) * strength;
     mist.emit(p.x + Math.cos(a) * 2, 0.2, p.z + Math.sin(a) * 2, Math.cos(a) * v, (8 + Math.random() * 14) * strength, Math.sin(a) * v,
       0.8 + Math.random() * 0.8, 0.8, 3.5, 0.85, 0.96, 0.95, 0.85, 20, 0.6);
   }
@@ -1207,8 +1209,8 @@ function updateLethe(dt, time) {
     } else if (!camUnder) {
       const dc = t.eye.distanceTo(camera.position);
       const fd = dc * scene.fog.density, fogK = Math.exp(-fd * fd);
-      const minS = (16 * dc) / pxScale;
-      const base = locked ? 0.85 + 0.15 * Math.sin(time * 30) : 0.55 + 0.3 * Math.sin(time * 4 + i);
+      const minS = (18 * dc) / pxScale;
+      const base = locked ? 0.85 + 0.15 * Math.sin(time * 30) : 0.72 + 0.25 * Math.sin(time * 4 + i);
       const a = Math.min(3.5, base / Math.max(0.3, fogK));
       glows.add(t.eye.x, t.eye.y, t.eye.z, 2.4, 0.14, 0.07, a, Math.max(locked ? 6 : 3.4, minS * (locked ? 1.7 : 1)));
       glows.add(t.eye.x, t.eye.y, t.eye.z, 1.8, 0.08, 0.04, a * (locked ? 0.45 : 0.22), Math.max(locked ? 16 : 9, minS * 3));
@@ -1847,6 +1849,15 @@ function updateTargets(dt, time) {
   // steam / smoke from the settlements
   for (const v of VENTS) {
     if (v.p.distanceToSquared(camera.position) > 700 * 700) continue;
+    if(v.waterfall) {
+      if(quality==='low'||(v.highOnly&&quality!=='high'))continue;
+      if(Math.random()<dt*(quality==='high'?26:10)) {
+        mist.emit(v.p.x+(Math.random()-0.5)*5,v.p.y+0.3,v.p.z+(Math.random()-0.5)*5,
+          (Math.random()-0.5)*3,2+Math.random()*4,(Math.random()-0.5)*3,
+          1.4+Math.random(),1.1,5,0.84,0.86,0.75,0.38,-0.6,0.5);
+      }
+      continue;
+    }
     if (Math.random() < dt * 9) {
       const c = v.k ? [0.3, 0.27, 0.25] : [0.92, 0.9, 0.88];
       mist.emit(v.p.x + (Math.random() - 0.5) * 2, v.p.y, v.p.z + (Math.random() - 0.5) * 2, 1 + Math.random(), 3 + Math.random() * 2, (Math.random() - 0.5),
@@ -2015,12 +2026,12 @@ function updateShipVisual(dt, time) {
   const skim = !G.underwater && G.y < 5 && running ? (1 - G.y / 5) * Math.min(G.speed / 60, 1.4) : 0;
   G.skim = skim;
   if (skim > 0.05) {
-    const n = Math.ceil(skim * 7);
+    const n = Math.ceil(skim * (7 + G.boost * (quality === 'high' ? 6 : 2)));
     for (let i = 0; i < n; i++) {
       const side = i % 2 ? 1 : -1;
       const ox = shipPos.x + SF.rx * side * (2.5 + Math.random() * 2) + SF.tx * (2 + Math.random() * 6);
       const oz = shipPos.z + SF.rz * side * (2.5 + Math.random() * 2) + SF.tz * (2 + Math.random() * 6);
-      const out = 5 + Math.random() * 8;
+      const out = 5 + Math.random() * 8 + G.boost * 4;
       mist.emit(ox, 0.3, oz, SF.rx * side * out + SF.tx * G.speed * 0.25, 5 + Math.random() * 9 * skim, SF.rz * side * out + SF.tz * G.speed * 0.25,
         0.6 + Math.random() * 0.6, 0.9, 3.4, 0.86, 0.96, 0.95, 0.7 * skim + 0.15, 16, 0.5);
     }
