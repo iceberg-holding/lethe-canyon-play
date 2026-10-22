@@ -174,7 +174,7 @@ export const WRECK = { s: 2960, side: -1 };
 export const ZONES = [];
 {
   const z0 = 520, z1 = PAD_B - 460, n = 13, len = (z1 - z0) / n;
-  for (let i = 0; i < n; i++) ZONES.push({ s0: z0 + i * len, s1: z0 + (i + 1) * len, shielded: true, mast: null, collapse: 0 });
+  for (let i = 0; i < n; i++) ZONES.push({ s0: z0 + i * len, s1: z0 + (i + 1) * len, shielded: true, mast: null, collapse: 0, relays: [], idx: i });
 }
 export function zoneAt(s) {
   for (const z of ZONES) if (s >= z.s0 && s < z.s1) return z;
@@ -189,7 +189,7 @@ function nearRock(s, lat, pad) {
 }
 ZONES.forEach((z, zi) => {
   const len = z.s1 - z.s0;
-  // beacon(s) on wall ledges
+  // LETHE relay(s) ("beacons") on wall ledges: they pass the drones' mark to this zone's rim turrets (round 5)
   const nb = zi % 3 === 0 ? 2 : 1;
   let first = null;
   for (let b = 0; b < nb; b++) {
@@ -197,8 +197,9 @@ ZONES.forEach((z, zi) => {
     const side = R() < 0.5 ? -1 : 1;
     const y = rr(7, 24);
     const lat = side * (wallLat(s, y, side) - 2.2);
-    const bc = { s, y, lat, side, alive: true, phase: R() * 6 };
+    const bc = { s, y, lat, side, alive: true, phase: R() * 6, zone: z };
     BEACONS.push(bc);
+    z.relays.push(bc);
     if (!first) first = bc;
   }
   // the mast sits on the same wall, just beyond the first beacon (in the line of fire)
@@ -236,10 +237,12 @@ ZONES.forEach((z, zi) => {
     const side = R() < 0.5 ? -1 : 1;
     const y = clamp(rimH(s) - rr(55, 75), 52, 80);
     const lat = side * (wallLat(s, y, side) - 1.2);
-    TURRETS.push({ s, y, lat, side, alive: true, cd: rr(2, 6), zone: z });
+    TURRETS.push({ s, y, lat, side, alive: true, cd: rr(2, 6), zone: z, relays: z.relays });
   }
 });
 TURRETS.sort((a, b) => a.s - b.s);
+// a section stays linked while any of its relays stands; a zone without relays (none in this layout) is always linked
+export const zoneLinked = (z) => !z || !z.relays.length || z.relays.some((r) => r.alive);
 
 // set dressing positions (static, merged into chunk meshes)
 export const DRESS = { cables: [], ruins: [], signs: [], markers: [] };

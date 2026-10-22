@@ -63,6 +63,7 @@
   #markBox .lbl span{color:#ff8d7a}
   #bMark>div.v{background:linear-gradient(90deg,#ff3a20,#ff9070);box-shadow:0 0 8px #ff4a30}
   #markBox.lock .lbl span,#markBox.lock .lbl b{color:#fff;animation:blink .25s steps(2) infinite}
+  #markBox.norelay .lbl span,#markBox.norelay .lbl b{color:#b9a8a0} #markBox.norelay #bMark>div.v{background:#6a5a55;box-shadow:none}
   @keyframes blink{50%{opacity:.25}}
   #airBox{position:absolute;left:50%;bottom:calc(16px + var(--sb));transform:translateX(-50%);width:min(24vw,280px);opacity:0;transition:opacity .3s}
   #bAir>div.v{background:linear-gradient(90deg,#3ee8e0,#c0fff8)}
@@ -74,6 +75,7 @@
     line-height:1.5;padding:7px 14px;border-left:2px solid var(--red);background:linear-gradient(90deg,rgba(20,8,6,.72),rgba(20,8,6,.35));opacity:0;transition:opacity .6s ease,transform .6s ease}
   #toast.on{opacity:1;transform:translate(-50%,0)}
   #toast i{font-style:normal;color:var(--dim)}
+  #toast em{font-style:italic}
   #pop{position:absolute;left:50%;top:calc(max(calc(118px + var(--st)),21%) + 62px);transform:translate(-50%,-50%);font-size:13px;font-weight:500;letter-spacing:.2em;color:#ffd9a8;opacity:0;white-space:nowrap}
   #reticle{position:absolute;left:0;top:0;width:30px;height:30px;margin:-15px 0 0 -15px;border:1px solid rgba(255,230,190,.55);border-radius:50%}
   #reticle::before,#reticle::after{content:"";position:absolute;background:rgba(255,230,190,.85)}
@@ -314,7 +316,7 @@
       </div>
       <div class="instr">
         <span class="tonly"><b>Left thumb</b> stick · <b>FIRE</b> / <b>BOOST</b> hold · <b>ROCKET</b> / <b>DIVE</b> tap · <b>TILT</b> gyro · ⚙ engine<br></span>
-        <span class="tg">Amber brackets</span> = targets (drones, beacons, rim turrets). <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water hides you — mines and hunters wait below.
+        <span class="tg">Amber brackets</span> = targets. Drones mark you, <b>relays</b> pass it to rim turrets — down a relay, the sector goes blind. <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water hides you — mines and hunters wait below.
       </div>
       <div class="eng" id="engSel"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div></div>
       <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i></div>
@@ -333,6 +335,7 @@
     <div>HEALTH / ЗДОРОВЬЕ<b id="rHealth"></b></div>
     <div>TARGETS / ЦЕЛИ<b id="rTargets"></b></div>
     <div>MASTS / МАЧТЫ<b id="rMasts"></b></div>
+    <div>RELAYS / РЕТРАНСЛЯТОРЫ<b id="rRelays"></b></div>
     <div>MINES / МИНЫ<b id="rMines"></b></div>
     <div>HUNTERS / ОХОТНИКИ<b id="rHunters"></b></div>
     <div>BOATS / КАТЕРА<b id="rBoats"></b></div>

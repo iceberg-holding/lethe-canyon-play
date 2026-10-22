@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, lerp, damp, smoothstep } from './util.js';
 import {
   PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
-  ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, resetLevel,
+  ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, zoneLinked, resetLevel,
   MINES, HUNTERS, BOATS, bedY, underLim,
 } from './world.js';
 import {
@@ -88,7 +88,7 @@ const mist = new Particles(1400, false, FOG_D_AIR);
 scene.add(mist.obj);
 const streaks = new Streaks();
 scene.add(streaks.obj);
-const beams = new Beams(256, FOG_D_AIR);
+const beams = new Beams(384, FOG_D_AIR);
 scene.add(beams.obj);
 const debris = new Debris(72);
 scene.add(debris.mesh);
@@ -166,13 +166,24 @@ drones.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 drones.frustumCulled = false;
 scene.add(drones);
 
-const beaconGeo = mergeGeometries([
-  colored(tr(new THREE.CylinderGeometry(0.22, 0.3, 4, 6), 0, 2, 0), [0.22, 0.22, 0.24]),
-  colored(tr(new THREE.BoxGeometry(1.1, 0.9, 1.1), 0, 4.2, 0), [0.55, 0.42, 0.25]),
-  colored(tr(new THREE.CylinderGeometry(0.8, 1, 0.5, 6), 0, 0.25, 0), [0.3, 0.3, 0.3]),
-  colored(tr(new THREE.BoxGeometry(0.08, 1.6, 0.08), 0.3, 5.3, 0), [0.15, 0.15, 0.15]),
+// LETHE relay (round 5; the old "beacon"): a thin dark antenna mast with a dish facing the canyon (+X), a red-striped
+// equipment box, a whip antenna and a red top light (glow sprite). Dark + red so it never reads as a cyan field mast.
+const RELAY_TOP = 8.7;
+const relayGeo = mergeGeometries([
+  colored(tr(new THREE.CylinderGeometry(0.8, 1, 0.5, 6), 0, 0.25, 0), [0.26, 0.26, 0.28]),
+  colored(tr(new THREE.CylinderGeometry(0.12, 0.2, 6.2, 5), 0, 3.1, 0), [0.2, 0.2, 0.22]),
+  colored(tr(new THREE.BoxGeometry(1.0, 0.06, 0.06), 0, 1.4, 0, 0, 0, 0.6), [0.24, 0.24, 0.26]),
+  colored(tr(new THREE.BoxGeometry(1.0, 0.06, 0.06), 0, 3.4, 0, 0, 0, -0.6), [0.24, 0.24, 0.26]),
+  colored(tr(new THREE.BoxGeometry(0.9, 0.8, 0.9), 0, 2.0, 0), [0.34, 0.15, 0.12]),
+  colored(tr(new THREE.BoxGeometry(0.94, 0.14, 0.94), 0, 2.25, 0), [0.85, 0.12, 0.07]),
+  colored(tr(new THREE.CylinderGeometry(1.15, 0.25, 0.35, 12), 0.45, 4.3, 0, 0, 0, -Math.PI / 2), [0.6, 0.58, 0.56]),
+  colored(tr(new THREE.CylinderGeometry(0.04, 0.04, 1.1, 4), 1.05, 4.3, 0, 0, 0, Math.PI / 2), [0.3, 0.3, 0.3]),
+  colored(tr(new THREE.BoxGeometry(0.18, 0.18, 0.18), 1.6, 4.3, 0), [0.8, 0.12, 0.07]),
+  colored(tr(new THREE.BoxGeometry(0.3, 0.12, 0.3), 0, 5.6, 0), [0.85, 0.12, 0.07]),
+  colored(tr(new THREE.CylinderGeometry(0.025, 0.05, 2.5, 4), 0, 7.4, 0), [0.15, 0.15, 0.16]),
+  colored(tr(new THREE.SphereGeometry(0.16, 8, 6), 0, RELAY_TOP, 0), [1.0, 0.15, 0.08]),
 ]);
-const beacons = new THREE.InstancedMesh(beaconGeo, lambertVC, BEACONS.length);
+const beacons = new THREE.InstancedMesh(relayGeo, lambertVC, BEACONS.length);
 scene.add(beacons);
 
 const MAST_LEN = 12, MAST_LEAN = 0.44;
@@ -194,6 +205,7 @@ turrets.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 turrets.frustumCulled = false;
 scene.add(turrets);
 const turretMounts = new THREE.InstancedMesh(buildTurretMountGeo(), turretMat, TURRETS.length);
+const TUR_LIVE = new THREE.Color(1, 1, 1), TUR_BLIND = new THREE.Color(0.5, 0.46, 0.46);
 scene.add(turretMounts);
 
 // ------------------------------------------------------------------ naval layer (round 4): mines, hunter-subs, boats
@@ -230,10 +242,13 @@ function pathBasis(s, m) {
 }
 function placeStatic() {
   BEACONS.forEach((b, i) => {
-    pathBasis(b.s, M1); toWorld(b.s, b.lat, b.y, V3); M1.setPosition(V3);
+    pathBasis(b.s, M1);
+    if (b.side > 0) M1.multiply(M2.makeRotationY(Math.PI));   // dish faces the canyon
+    toWorld(b.s, b.lat, b.y, V3); M1.setPosition(V3);
     beacons.setMatrixAt(i, b.alive ? M1 : ZERO_M);
     b.wp = toWorld(b.s, b.lat, b.y + 4.2, new THREE.Vector3());
     b.wp2 = toWorld(b.s, b.lat, b.y + 2, new THREE.Vector3());
+    b.top = toWorld(b.s, b.lat, b.y + RELAY_TOP, new THREE.Vector3());
   });
   beacons.instanceMatrix.needsUpdate = true;
   MASTS.forEach((m, i) => setMastMatrix(m, i));
@@ -245,6 +260,8 @@ function placeStatic() {
     turretMounts.setMatrixAt(i, M1);
   });
   turretMounts.instanceMatrix.needsUpdate = true;
+  TURRETS.forEach((t, i) => { t.blind = false; turrets.setColorAt(i, TUR_LIVE); });
+  turrets.instanceColor.needsUpdate = true;
   initNaval();
 }
 function setMastMatrix(m, i) {
@@ -286,7 +303,7 @@ const hud = {
   root: $('hud'), cargo: $('tCargo'), shield: $('tShield'), health: $('tHealth'), rad: $('tRad'), score: $('tScore'), speed: $('tSpeed'), dist: $('tDist'),
   bCargo: barEls('bCargo'), bShield: barEls('bShield'), bHealth: barEls('bHealth'), bRad: barEls('bRad'), bAir: barEls('bAir'), bMark: barEls('bMark'),
   rowCargo: $('rCargoRow'), rowShield: $('rShieldRow'), rowHealth: $('rHealthRow'),
-  air: $('tAir'), airBox: $('airBox'), msg: $('msg'), pop: $('pop'), toast: $('toast'), markBox: $('markBox'), mark: $('tMark'), sDown: $('sDown'),
+  air: $('tAir'), airBox: $('airBox'), msg: $('msg'), pop: $('pop'), toast: $('toast'), markBox: $('markBox'), markLbl: document.querySelector('#markBox .lbl span'), mark: $('tMark'), sDown: $('sDown'),
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
   dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'),
 };
@@ -322,6 +339,7 @@ function freshState() {
     rockets: ROCKET_AMMO, rocketCd: 0, rocketsFired: 0, recoilT: 9, dip: 0, kick: 0, jolt: 0, micro: 0,
     mineKills: 0, mineHits: 0, hunterKills: 0, hunterRams: 0, hunterShots: 0, boatKills: 0, navalHits: 0, boatShots: 0, ricochets: 0, armorT: 0,
     mineHinted: false, hunterHinted: false, boatHinted: false,
+    relayKills: 0, relayHinted: false, blindSaid: false, noRelay: false, blockLogged: false, lockLog: [], beamSegs: 0, beamTurret: -1,
   };
 }
 G = freshState();
@@ -891,14 +909,16 @@ function segSphere(a, b, c, r) {
 function killTarget(kind, obj) {
   obj.alive = false;
   G.kills++;
-  const pts = kind === 'drone' ? 150 : kind === 'turret' ? 250 : 100;
+  // a relay kill that cuts its section's last link pays a bonus
+  const blinds = kind === 'beacon' && !zoneLinked(obj.zone);
+  const pts = kind === 'drone' ? 150 : kind === 'turret' ? 250 : RELAY_PTS + (blinds ? RELAY_BLIND_PTS : 0);
   G.score += pts;
   explode(kind === 'turret' ? obj.wp : obj.wp, kind === 'beacon' ? 0.8 : kind === 'turret' ? 1.3 : 1);
   audio.hitTick(); audio.score();
   hitMarker();
-  const label = { drone: 'SPOTTER / ДРОН', beacon: 'BEACON / МАЯК', turret: 'TURRET / ТУРЕЛЬ' }[kind];
+  const label = { drone: 'SPOTTER / ДРОН', beacon: 'RELAY / РЕТРАНСЛЯТОР', turret: 'TURRET / ТУРЕЛЬ' }[kind];
   popScore(`+${pts} ${label}`);
-  if (kind === 'beacon') { beacons.setMatrixAt(BEACONS.indexOf(obj), ZERO_M); beacons.instanceMatrix.needsUpdate = true; }
+  if (kind === 'beacon') { beacons.setMatrixAt(BEACONS.indexOf(obj), ZERO_M); beacons.instanceMatrix.needsUpdate = true; relayDown(obj, blinds); }
   if (kind === 'drone' && obj.spotting) {
     // killing the spotter wipes the mark and breaks a pending lock
     G.mark = 0;
@@ -907,6 +927,26 @@ function killTarget(kind, obj) {
     showMsg('SPOTTER DOWN — MARK CLEARED', 'СПОТТЕР СБИТ — МЕТКА СНЯТА', 1.6, '#9ff2d8');
   }
   if (kind === 'turret') { G.turretKills++; if (G.lock.turret === obj) G.lock.phase = 'none'; }
+}
+// ---- LETHE relays (round 5): a dead relay cuts its section's turrets off from the drones' mark
+const RELAY_PTS = 200, RELAY_BLIND_PTS = 150;
+function relayDown(r, blinds) {
+  G.relayKills++;
+  sparkBurst(r.top, 14, [2.2, 0.3, 0.15]);
+  if (!blinds) {
+    const left = r.zone.relays.filter((x) => x.alive).length;
+    toast(`<b>RELAY DOWN</b> — sector still linked (${left} left)<br><i>РЕТРАНСЛЯТОР СБИТ — сектор ещё на связи (осталось ${left})</i>`, 3.5, true);
+    return;
+  }
+  // the section goes blind: break a lock held by one of its turrets
+  const L = G.lock;
+  if (L.turret && L.turret.zone === r.zone && (L.phase === 'laser' || L.phase === 'volley')) { L.phase = 'cool'; L.t = 0.6; }
+  showMsg('RELAY DOWN — TURRETS BLIND', 'РЕТРАНСЛЯТОР СБИТ — ТУРЕЛИ ОСЛЕПЛИ', 2, '#ffb070');
+  toast('<b>RELAY DOWN — turrets blind</b><br><i>РЕТРАНСЛЯТОР СБИТ — турели ослепли</i>', 3.5, true);
+  if (!G.blindSaid) {
+    G.blindSaid = true;
+    toast('LETHE: <em>“…link lost. Sector blind.”</em> &nbsp;/&nbsp; ЛЕТА: <em>«…связь потеряна. Сектор слеп.»</em>', 4);
+  }
 }
 function breakMast(m) {
   m.alive = false;
@@ -1076,29 +1116,30 @@ function updateLethe(dt, time) {
     }
   }
   for (let i = nb; i < brackets.length; i++) brackets[i].style.display = 'none';
+  // --- relays (round 5): the mark reaches the turrets only through a live relay of the ship's section
+  for (const t of TURRETS) t.blind = !zoneLinked(t.zone);
+  const shipZone = zoneAt(G.s);
+  G.noRelay = active && !zoneLinked(shipZone);
   // --- mark meter
   if (G.spotters > 0) G.mark = Math.min(1, G.mark + dt / 3.4);
   else G.mark = Math.max(0, G.mark - dt * (G.underwater ? 1.4 : 0.28));
-  if (G.spotters > 0 && G.mark < 1) {
+  if (G.spotters > 0 && G.mark < 1 && !G.noRelay) {
     G.markBeep -= dt;
     if (G.markBeep <= 0) { audio.lockTick(G.mark); G.markBeep = lerp(0.42, 0.09, G.mark); }
   }
   // --- lock sequence: laser designation -> accurate volley -> cooldown
+  const cand = G.noRelay ? null : pickLockTurret();
   if (L.phase === 'none' && G.mark >= 1 && active) {
-    let best = null, bd = 1e9;
-    for (const t of TURRETS) {
-      if (!t.alive) continue;
-      const ds = t.s - G.s;
-      if (ds < -90 || ds > 450) continue;
-      const d = Math.abs(ds - 120);
-      if (d < bd) { bd = d; best = t; }
-    }
-    if (best) {
-      L.phase = 'laser'; L.t = 1.35; L.turret = best; L.shots = 0; G.lostSaid = false;
+    if (cand) {
+      L.phase = 'laser'; L.t = 1.35; L.turret = cand; L.shots = 0; G.lostSaid = false; L.relay = true;
+      logLock(cand, true);
       audio.lockOn(); audio.laser();
       showMsg('LETHE LOCK — DIVE OR DODGE', 'ЗАХВАТ ЛЕТЫ — НЫРЯЙ', 1.6, '#ff6a50');
-    }
+    } else if (G.noRelay && !G.blockLogged) { G.blockLogged = true; logLock(null, false); }
   }
+  if (G.mark < 0.5) G.blockLogged = false;
+  // a lock can't survive its section going blind (also covers a relay killed by a rocket splash)
+  if ((L.phase === 'laser' || L.phase === 'volley') && L.turret && L.turret.blind) { L.phase = 'cool'; L.t = 0.6; }
   if ((L.phase === 'laser' || L.phase === 'volley') && L.turret) threat(L.turret, L.turret.wp);
   if (L.phase === 'laser') {
     L.t -= dt;
@@ -1117,9 +1158,11 @@ function updateLethe(dt, time) {
     L.t -= dt;
     if (L.t <= 0) L.phase = 'none';
   }
-  // --- turrets: track the ship, rare inaccurate harassment when unmarked
+  // --- turrets: track the ship, rare inaccurate harassment when unmarked; blind ones scan slowly and rarely fire wild
+  let colDirty = false;
   for (let i = 0; i < TURRETS.length; i++) {
     const t = TURRETS[i];
+    if (t.blind !== t.wasBlind) { t.wasBlind = t.blind; turrets.setColorAt(i, t.blind ? TUR_BLIND : TUR_LIVE); colDirty = true; }
     const near = t.s > G.s - 150 && t.s < G.s + 1300;
     if (!near) { turrets.setMatrixAt(i, ZERO_M); continue; }
     if (!t.alive) {
@@ -1130,8 +1173,9 @@ function updateLethe(dt, time) {
       if (Math.random() < dt * 4) mist.emit(t.wp.x, t.wp.y + 1, t.wp.z, 0, 3, 0, 2.5, 2, 9, 0.15, 0.13, 0.12, 0.45, -0.6, 0.3);
       continue;
     }
-    // aim (smoothly) at the ship
-    V3.copy(shipPos).sub(t.wp).normalize();
+    // aim (smoothly) at the ship — a blind turret sweeps the canyon instead
+    if (t.blind) toWorld(t.s + 70 * Math.sin(time * 0.35 + i * 1.7), -t.side * 10, 8 + 6 * Math.sin(time * 0.5 + i), V3).sub(t.wp).normalize();
+    else V3.copy(shipPos).sub(t.wp).normalize();
     t.aim.lerp(V3, damp(L.turret === t && L.phase !== 'none' ? 8 : 2.5, dt)).normalize();
     M1.lookAt(V1.set(0, 0, 0), t.aim, UP);
     M1.setPosition(t.wp);
@@ -1141,7 +1185,11 @@ function updateLethe(dt, time) {
     const locked = L.turret === t && (L.phase === 'laser' || L.phase === 'volley');
     // red sensor eye: bloom sprite with a distance-scaled minimum size (stays a readable dot far away; fog-compensated).
     // The sprites are depth-tested, so walls still hide turrets around a bend.
-    if (!camUnder) {
+    if (!camUnder && t.blind) {
+      // blind: a dull, steady dark-red ember, no fog compensation and no lock pulse
+      const minS = (7 * t.eye.distanceTo(camera.position)) / pxScale;
+      glows.add(t.eye.x, t.eye.y, t.eye.z, 0.55, 0.12, 0.1, 0.55, Math.max(2.2, minS));
+    } else if (!camUnder) {
       const dc = t.eye.distanceTo(camera.position);
       const fd = dc * scene.fog.density, fogK = Math.exp(-fd * fd);
       const minS = (16 * dc) / pxScale;
@@ -1152,16 +1200,19 @@ function updateLethe(dt, time) {
     }
     if (!active || G.underwater) continue;
     const ds = t.s - G.s;
-    if (!locked && ds > -40 && ds < 360 && G.mark < 0.5) {
+    if (!locked && ds > -40 && ds < 360 && (G.mark < 0.5 || t.blind)) {
       t.cd -= dt;
       if (t.cd <= 0) {
-        t.cd = 6 + Math.random() * 5;
-        V4.copy(shipPos).add(V2.set((Math.random() - 0.5) * 28, 4 + Math.random() * 10, (Math.random() - 0.5) * 28));
+        const wild = t.blind ? 2.2 : 1;
+        t.cd = (6 + Math.random() * 5) * (t.blind ? 2.6 : 1);
+        V4.copy(shipPos).add(V2.set((Math.random() - 0.5) * 28 * wild, 4 + Math.random() * 10 * wild, (Math.random() - 0.5) * 28 * wild));
         if (lineOfSight(t.wp, shipPos, t.s)) fireTurret(t, V4, false);
       }
     }
   }
   turrets.instanceMatrix.needsUpdate = true;
+  if (colDirty) turrets.instanceColor.needsUpdate = true;
+  dataBeams(time, cand);
   // targeting laser
   if (L.phase === 'laser' && L.turret) {
     const m = L.turret.muzzle;
@@ -1195,6 +1246,59 @@ function updateLethe(dt, time) {
     beams.add(V3.x, V3.y, V3.z, b.p.x, b.p.y, b.p.z, 0.75, c[0], c[1], c[2], 1);
     glows.add(b.p.x, b.p.y, b.p.z, c[0] * 0.9, c[1] * 0.9 + 0.1, c[2] * 0.9, 1, 3.4);
   }
+}
+// the turret a full mark would hand over to: a live, linked turret in the window ahead (nearest to ~120 m ahead)
+function pickLockTurret() {
+  let best = null, bd = 1e9;
+  for (const t of TURRETS) {
+    if (!t.alive || t.blind) continue;
+    const ds = t.s - G.s;
+    if (ds < -90 || ds > 450) continue;
+    const d = Math.abs(ds - 120);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best;
+}
+function logLock(t, relay) {
+  G.lockLog.push({ t: +G.t.toFixed(2), s: Math.round(G.s), turret: t ? TURRETS.indexOf(t) : -1, zone: zoneAt(G.s)?.idx ?? -1, relay, locked: !!t });
+  if (G.lockLog.length > 20) G.lockLog.shift();
+}
+// DATA BEAM: while the mark builds / holds, faint red-amber packets run marking drone -> relay -> locking turret
+const DB_SEG = { low: 6, med: 11, high: 16 };
+function dataSeg(a, b, time, k, alpha) {
+  const len = a.distanceTo(b);
+  if (len < 1) return;
+  const n = Math.min(DB_SEG[quality] || 11, Math.ceil(len / 9)), dl = Math.min(2.6, (len / n) * 0.4);
+  // faint carrier line, then dashed packets travelling a -> b
+  beams.add(a.x, a.y, a.z, b.x, b.y, b.z, 0.12, 1.7, 0.36, 0.1, alpha * (0.4 + 0.12 * Math.sin(time * 9 + k)));
+  const ph = (time * 1.6 + k * 0.37) % 1;
+  for (let j = 0; j < n; j++) {
+    const u = (j + ph) / n, u0 = Math.max(0, u - dl / len);
+    const fl = alpha * (0.55 + 0.45 * Math.sin(time * 14 + j * 2.1 + k));
+    beams.add(a.x + (b.x - a.x) * u0, a.y + (b.y - a.y) * u0, a.z + (b.z - a.z) * u0,
+      a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u, a.z + (b.z - a.z) * u, 0.3, 2.6, 0.7, 0.16, fl);
+  }
+  G.beamSegs++;
+}
+function dataBeams(time, cand) {
+  G.beamSegs = 0; G.beamTurret = -1;
+  const L = G.lock, holding = L.phase === 'laser' || L.phase === 'volley';
+  if (camUnder || G.phase !== 'flight' || (!holding && (G.spotters === 0 || G.mark < 0.02))) return;
+  const t = holding ? L.turret : cand;
+  if (!t || t.blind || !t.alive) return;
+  let drone = null, dd = 1e9;
+  for (const d of DRONES) if (d.spotting) { const x = d.wp.distanceTo(shipPos); if (x < dd) { dd = x; drone = d; } }
+  // the relay of the turret's section nearest to the marking drone (or to the ship)
+  const from = drone ? drone.wp : shipPos;
+  let relay = null, rd = 1e9;
+  for (const r of t.relays) if (r.alive) { const x = r.top.distanceTo(from); if (x < rd) { rd = x; relay = r; } }
+  if (!relay) return;
+  const a = holding ? 1 : 0.35 + 0.65 * G.mark;
+  if (drone) dataSeg(drone.wp, relay.top, time, 0, a);
+  dataSeg(relay.top, t.eye, time, 1, a);
+  // the relay's top light flares while it is passing the mark
+  glows.add(relay.top.x, relay.top.y, relay.top.z, 2.4, 0.5, 0.15, 0.6 + 0.4 * Math.sin(time * 18), 7);
+  G.beamTurret = TURRETS.indexOf(t);
 }
 function explodeSmall(p) {
   for (let i = 0; i < 6; i++) sparks.emit(p.x, p.y, p.z, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, 0.35, 2, 5, 2, 0.7, 0.3, 1, 0, 2);
@@ -1683,8 +1787,18 @@ function updateTargets(dt, time) {
   drones.instanceMatrix.needsUpdate = true;
   for (const b of BEACONS) {
     if (!b.alive || b.s < G.s - 100 || b.s > G.s + 1300) continue;
+    // blinking red top light + a faint upward data shimmer (rising red motes; fewer on low quality)
     const on = Math.sin(time * 5 + b.phase) > 0.2 ? 1 : 0.12;
-    glows.add(b.wp.x, b.wp.y + 0.2, b.wp.z, 1.8, 0.7, 0.15, on, 5.5);
+    const tp = b.top;
+    glows.add(tp.x, tp.y + 0.1, tp.z, 2.2, 0.22, 0.1, on, 4.5);
+    glows.add(tp.x, tp.y + 0.1, tp.z, 1.4, 0.12, 0.06, on * 0.25, 12);
+    if (b.s - G.s > 500) continue;
+    const nm = quality === 'low' ? 2 : 4;
+    for (let k = 0; k < nm; k++) {
+      const u = (time * 0.45 + b.phase + k / nm) % 1;
+      const fl = (1 - u) * u * 4 * (0.6 + 0.4 * Math.sin(time * 11 + k * 2 + b.phase));
+      glows.add(tp.x + Math.sin(k * 2.3 + time) * 0.25, tp.y + 0.6 + u * 9, tp.z + Math.cos(k * 1.7 + time) * 0.25, 1.6, 0.35, 0.12, 0.32 * fl, 1.6 + u * 1.2);
+    }
   }
   for (const m of MASTS) {
     if (m.s < G.s - 100 || m.s > G.s + 1300) continue;
@@ -2049,7 +2163,7 @@ function viewLOS(a, b, s0) {
   return true;
 }
 const TGT_N = 10, TGT_RANGE = 260, TGT_RANGE_UW = 95;
-const TGT_LABEL = { turret: 'TURRET / ТУРЕЛЬ', drone: 'DRONE / ДРОН', beacon: 'BEACON / МАЯК', mine: 'MINE / МИНА', hunter: 'HUNTER / ОХОТНИК',
+const TGT_LABEL = { turret: 'TURRET / ТУРЕЛЬ', drone: 'DRONE / ДРОН', beacon: 'RELAY / РЕТРАНСЛЯТОР', mine: 'MINE / МИНА', hunter: 'HUNTER / ОХОТНИК',
   boat: 'BOAT / КАТЕР · ARMORED', weak: 'WEAK POINT / УЯЗВИМОЕ МЕСТО' };
 const TGT_R = { turret: 2.6, drone: 2.4, beacon: 2.2, mine: 1.8, hunter: 1.6, boat: 5, weak: 2.2 };
 const tgtEls = [], mtagEls = [];
@@ -2104,6 +2218,10 @@ function updateMarkers(rdt) {
         if (c.kind === 'turret' && !G.turretHinted) {
           G.turretHinted = true;
           toast('<b>Turrets on the rims fire when a drone marks you.</b> Shoot them or the drone.<br><i>Турели стреляют по метке дрона — сбей их или дрон.</i>', 6);
+        }
+        if (c.kind === 'beacon' && !G.relayHinted) {
+          G.relayHinted = true;
+          toast('<b>Relays pass drone marks to turrets.</b> Shoot the relay first — the section goes blind.<br><i>Ретрансляторы передают метку турелям. Сбей ретранслятор — сектор ослепнет.</i>', 6);
         }
       }
       const label = c.kind === 'weak' || (seen && seen.o === c.o && seen.t > 0) ? TGT_LABEL[c.kind] : '';
@@ -2165,10 +2283,16 @@ function updateHUD(dt, time) {
   setBar(hud.bMark, G.mark);
   hud.rowShield.classList.toggle('regen', G.regen);
   hud.rowShield.classList.toggle('down', G.shield <= 0);
-  hud.markBox.style.opacity = G.mark > 0.01 || G.lock.phase === 'laser' ? 1 : 0;
   const locked = G.lock.phase === 'laser' || G.lock.phase === 'volley';
-  hud.markBox.classList.toggle('lock', G.mark >= 1 || locked);
-  hud.tintLock.style.opacity = locked ? 0.6 + 0.4 * Math.sin(time * 20) : G.mark * 0.35;
+  // in a blind section (its relays are down) the mark has nowhere to go: the bar reads NO RELAY
+  const noRelay = G.noRelay && !locked;
+  hud.markBox.style.opacity = G.mark > 0.01 || G.lock.phase === 'laser' || (noRelay && G.spotters > 0) ? 1 : 0;
+  hud.markBox.classList.toggle('lock', !noRelay && (G.mark >= 1 || locked));
+  if (noRelay !== hud.markBox.classList.contains('norelay')) {
+    hud.markBox.classList.toggle('norelay', noRelay);
+    hud.markLbl.innerHTML = noRelay ? 'NO RELAY <i>/ НЕТ СВЯЗИ</i>' : 'MARK <i>/ МЕТКА</i>';
+  }
+  hud.tintLock.style.opacity = locked ? 0.6 + 0.4 * Math.sin(time * 20) : G.mark * (noRelay ? 0.08 : 0.35);
   hud.airBox.style.opacity = G.underwater || G.air < 59.5 ? 1 : 0;
   hud.airBox.classList.toggle('low', G.air < 15);
   hud.routeShip.style.left = clamp((G.s - PAD_A) / ROUTE, 0, 1) * 100 + '%';
@@ -2212,7 +2336,7 @@ function updateHUD(dt, time) {
   hud.health.textContent = Math.ceil(Math.max(0, G.health)) + '%';
   hud.rad.textContent = G.rad > 0.05 ? (G.rad * 4.2).toFixed(1) + ' Sv/h' : 'SHIELDED';
   hud.rad.style.color = G.rad > 0.05 ? '#ff6a4a' : '#9ff';
-  hud.mark.textContent = locked ? 'LOCK' : Math.round(G.mark * 100) + '%';
+  hud.mark.textContent = locked ? 'LOCK' : G.noRelay ? '—' : Math.round(G.mark * 100) + '%';
   hud.score.textContent = G.score;
   hud.speed.textContent = Math.round(G.speed * (1 - G.dip) * 3.6);
   hud.dist.textContent = (Math.max(0, PAD_B - G.s) / 1000).toFixed(2);
@@ -2235,6 +2359,7 @@ function showResult() {
   $('rHealth').textContent = Math.round(Math.max(0, G.health)) + '%';
   $('rTargets').textContent = `${G.kills} / ${N_DRONE_REAL + BEACONS.length + TURRETS.length}`;
   $('rMasts').textContent = `${G.mastsBroken}`;
+  $('rRelays').textContent = `${G.relayKills} / ${BEACONS.length}`;
   $('rMines').textContent = `${G.mineKills} / ${N_MINE_REAL}`;
   $('rHunters').textContent = `${G.hunterKills} / ${N_HUNTER_REAL}`;
   $('rBoats').textContent = `${G.boatKills} / ${N_BOAT_REAL}`;
@@ -2503,7 +2628,11 @@ window.__lethe = {
     dive: G.dive, radiation: +G.rad.toFixed(3), mastsBroken: G.mastsBroken, kills: G.kills,
     rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol, engineSound: audio.engine,
     aim: aimObj ? (TURRETS.includes(aimObj) ? 'turret' : DRONES.includes(aimObj) ? 'drone' : MINES.includes(aimObj) ? 'mine' : HUNTERS.includes(aimObj) ? 'hunter'
-      : BOATS.includes(aimObj) ? 'boat' : 'beacon') : null, turretKills: G.turretKills,
+      : BOATS.includes(aimObj) ? 'boat' : 'relay') : null, turretKills: G.turretKills,
+    relaysAlive: BEACONS.filter((b) => b.alive).length, relaysDown: BEACONS.filter((b) => !b.alive).length, relayKills: G.relayKills,
+    noRelay: G.noRelay, zone: zoneAt(G.s)?.idx ?? -1, sectorLinked: zoneLinked(zoneAt(G.s)), lockRelay: G.lock.phase !== 'none' ? !!G.lock.relay : null,
+    lockTurret: G.lock.turret ? TURRETS.indexOf(G.lock.turret) : -1, lockLog: G.lockLog.slice(-8), dataBeam: G.beamSegs, beamTurret: G.beamTurret,
+    blindTurrets: TURRETS.filter((t) => t.alive && t.blind).length,
     mines: { alive: MINES.filter((m) => m.alive).length, killed: G.mineKills, hit: G.mineHits },
     hunters: { alive: HUNTERS.filter((h) => h.alive).length, killed: G.hunterKills, rams: G.hunterRams, shots: G.hunterShots, hunting: HUNTERS.filter((h) => h.alive && h.mode === 'hunt').length,
       visible: HUNTERS.filter((h) => h.alive && h.vis && h.wp.distanceTo(shipPos) < 120).length },
@@ -2527,6 +2656,11 @@ window.__lethe = {
       return DRONES.indexOf(d);
     },
     forceMark: (v = 1) => { G.mark = v; },
+    // round 5 relays: list (with the turrets each one links) and kill one (as if shot: score, toasts)
+    relays: () => BEACONS.map((b, i) => ({ i, s: +b.s.toFixed(0), zone: b.zone.idx, alive: b.alive, side: b.side,
+      turrets: TURRETS.map((t, k) => (t.zone === b.zone ? k : -1)).filter((k) => k >= 0) })),
+    killRelay: (i) => { const b = BEACONS[i]; if (b && b.alive) killTarget('beacon', b); return b ? zoneLinked(b.zone) : null; },
+    turretBlind: () => TURRETS.map((t) => t.blind),
     // round 4 naval helpers: spawn a target `ahead` metres in front of the ship (debug slots)
     spawnMine: (ahead = 60, lat = null, y = -2.4) => {
       const m = MINES.find((x) => x.debug && !x.alive) || MINES[MINES.length - 1];
