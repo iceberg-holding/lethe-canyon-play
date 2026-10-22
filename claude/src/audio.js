@@ -384,6 +384,7 @@ export class Audio {
   hunterCharge(pan = 0) { if (this.ctx) this.tone('sine', 420, 1500, 0.05, 0.5, 0, { pan, attack: 0.4 }); }
   hunterShot(pan = 0) { if (this.ctx) { this.tone('sine', 900, 160, 0.12, 0.25, 0, { pan, attack: 0.002 }); this.noiseHit('lowpass', 900, 1, 0.18, 0.2, 200, { pan }); } }
   // patrol boat about to fire: two short horn blips
+  boatApproach(pan = 0) { this.tone('sawtooth', 72, 65, 0.045, 1.3, 0, {pan, attack:0.15, verb:0.25}); this.tone('triangle', 180, 155, 0.08, 0.7, 0.15, {pan, attack:0.08, verb:0.4}); }
   boatAlarm(pan = 0) { if (this.ctx) for (let i = 0; i < 2; i++) this.tone('square', 540, 520, 0.035, 0.12, i * 0.16, { pan, attack: 0.004 }); }
   empty() { this.tone('square', 220, 200, 0.04, 0.06, 0, { ui: true }); }
 }

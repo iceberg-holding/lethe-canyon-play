@@ -590,16 +590,27 @@ export const FALLS = [];
 function addFalls(grp, sA, sB) {
   for (const s of [1850, 7080]) {
     if (s < sA || s >= sB) continue;
-    const B = new Builder(), rows = 24, width = s === 1850 ? 7 : 4;
+    const B = new Builder(), rows = 24, cols = 9, width = s === 1850 ? 18 : 10, edges = [];
+    // Sheets follow the wall column by column, flare slightly toward the foot and
+    // bulge gently toward the river, always keeping clear of the analytic wall.
+    for (let layer = 0; layer < 3; layer++) {
     for (let i = 0; i <= rows; i++) {
-      const y = 3 + i / rows * 57;
-      for (const d of [-width / 2, width / 2]) {
-        const ss = s + d, lat = outerWall(s, y - 1, y + 2, width / 2 + 1, 1) + 0.3;
+      const y = 3 + i / rows * 57, yn = i / rows;
+      for (let c = 0; c < cols; c++) {
+        const u = c / (cols - 1), half = width / 2 * (1.12 - 0.2 * yn) * (1 - layer * 0.07);
+        const ss = s + (u - 0.5) * 2 * half;
+        const bulge = Math.sin(Math.PI * u) * (0.35 + 0.55 * (1 - yn)) * (layer === 0 ? 1 : 0.6);
+        const lat = Math.max(outerWall(ss, y - 1, y + 2, 3, 1) + 0.3 + layer * 0.24 - bulge, wallLat(ss, y, 1) + 0.35);
         const p = toWorld(ss, lat, y, new THREE.Vector3());
-        B.v(p.x, p.y, p.z, 1, 1, 1, d / width + 0.5, (y - 3) / 57);
+        B.v(p.x, p.y, p.z, 1, 1, 1, u, yn);
+        if (layer === 0 && (c === 0 || c === cols - 1) && i % 3 === 1) edges.push({ p, out: c ? 1 : -1 });
       }
     }
-    for (let i = 0; i < rows; i++) { const a = i * 2; B.tri(a, a + 2, a + 1); B.tri(a + 1, a + 2, a + 3); }
+    for (let i = 0; i < rows; i++) for (let c = 0; c < cols - 1; c++) {
+      const a = layer * (rows + 1) * cols + i * cols + c;
+      B.tri(a, a + cols, a + 1); B.tri(a + 1, a + cols, a + cols + 1);
+    }
+    }
     const mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
       uniforms: { uTime: { value: 0 }, uFlowRight: { value: new THREE.Vector3(frame(s,F).tx,0,F.tz) } },
@@ -610,20 +621,29 @@ function addFalls(grp, sA, sB) {
       void main(){
         float y=clamp(vUv.y,0.0,1.0), t=uTime;
         float x=vUv.x+sin(y*19.0+t*1.7)*0.018;
-        float edge=smoothstep(0.0,0.16,x)*smoothstep(1.0,0.84,x);
         vec2 flow=vec2(x*13.0,y*8.0+t*2.8);
         float broad=n(flow), fine=n(flow*vec2(3.7,2.1)+t*0.7), veil=n(flow*vec2(0.55,3.4)-t);
-        float streak=pow(n(vec2(x*61.0,y*2.0+t*3.0)),3.0)*fine;
-        float lip=smoothstep(0.91,0.99,y), impact=pow(1.0-y,7.0);
-        float density=0.04+smoothstep(0.18,0.82,broad)*0.62+fine*0.16+streak*0.36+lip*0.5+impact*0.3;
-        vec3 col=mix(vec3(0.26,0.44,0.40),vec3(0.94,0.88,0.71),clamp(broad*0.7+streak+lip+impact*0.5,0.0,1.0));
-        gl_FragColor=vec4(col,edge*density*(0.55+veil*0.45)*exp(-vD*vD*0.0000036)); }`,
+        float streak=pow(n(vec2(x*125.0,y*2.0+t*3.0)),3.0)*fine;
+        float fibre=n(vec2(x*60.0,y*3.0+t*3.4));
+        // ragged, noise-broken sides that fray into separate fibres
+        float side=min(x,1.0-x), sn=n(vec2(step(0.5,x)*31.0+y*7.0+t*2.4,y*2.0));
+        float edge=smoothstep(0.0,0.2,side+(sn-0.5)*0.14);
+        edge*=mix(smoothstep(0.3,0.7,fibre),1.0,smoothstep(0.06,0.2,side));
+        // soft broken lip at the top, dissolving foot at the bottom
+        float ln=n(vec2(x*21.0,t*0.6)), bn=n(vec2(x*17.0,t*1.9));
+        float top=1.0-smoothstep(0.9,1.0,y+(ln-0.5)*0.06);
+        float foot=smoothstep(0.0,0.13,y-0.02+(bn-0.5)*0.1);
+        float lip=smoothstep(0.84,0.94,y)*top, impact=exp(-y*9.0);
+        float density=0.12+smoothstep(0.18,0.82,broad)*0.58+fine*0.16+streak*0.55+lip*0.45+impact*0.7;
+        vec3 col=mix(vec3(0.26,0.44,0.40),vec3(0.94,0.9,0.78),clamp(broad*0.65+streak+lip+impact*1.4,0.0,1.0));
+        col=mix(col,vec3(1.08,1.06,1.0),impact*0.8);
+        gl_FragColor=vec4(col,clamp(edge*top*foot*density*(0.55+veil*0.45),0.0,1.0)*exp(-vD*vD*0.0000036)); }`,
     });
-    const m = mk(B, mat); m.userData.detail = true; m.userData.highOnly = s === 7080;
+    const m = mk(B, mat); m.userData.width = width; m.userData.layers = 3; m.userData.detail = true; m.userData.highOnly = s === 7080;
     grp.add(m); FALLS.push(m);
     // Impact pool is entirely behind the analytic wall, at the foot of the cascade.
-    const p = toWorld(s, outerWall(s, 2, 5, width * 1.4 + 1, 1) + width * 0.34, 3.1, new THREE.Vector3());
-    const pool = new THREE.Mesh(new THREE.PlaneGeometry(width * 2.8, width * 0.65), new THREE.ShaderMaterial({
+    const p = toWorld(s, outerWall(s, 2, 5, width * 1.2 + 1, 1) + width * 0.11, 3.1, new THREE.Vector3());
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(width * 2.4, width * 0.2), new THREE.ShaderMaterial({
       transparent:true, depthWrite:false, side:THREE.DoubleSide,
       uniforms:{uTime:{value:0}},
       vertexShader:`varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
@@ -642,7 +662,7 @@ function addFalls(grp, sA, sB) {
     pool.matrixAutoUpdate=false;
     pool.matrix.makeBasis(new THREE.Vector3(F.tx,0,F.tz),new THREE.Vector3(F.rx,0,F.rz),_U).setPosition(p);
     pool.userData.detail=true; pool.userData.highOnly=s===7080; grp.add(pool); FALLS.push(pool);
-    VENTS.push({ p, k: 0, waterfall:true, highOnly:s===7080 });
+    VENTS.push({ p, k: 0, waterfall:true, highOnly:s===7080, edges, width, tx:F.tx, tz:F.tz, rx:F.rx, rz:F.rz });
   }
 }
 

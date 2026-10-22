@@ -159,7 +159,12 @@
   #reticle.uw::before,#reticle.uw::after{background:rgba(140,255,240,.9)}
   .tgt.uwk::before,.tgt.uwk::after{border-color:#8ff6e6}
   .tgt.uwk span{color:#8ff6e6}
-  .tgt.boat{opacity:.6}
+  .tgt.boat{opacity:1;color:var(--amber)}
+  .tgt.boat::before,.tgt.boat::after{border-color:currentColor;border-width:2px}
+  .tgt.boat span{color:inherit;font-size:11.5px;font-weight:600;letter-spacing:.14em;margin-top:6px;padding:1px 6px;background:rgba(18,8,5,.55);border:1px solid currentColor;text-shadow:0 1px 2px #000}
+  .tgt.boat::before,.tgt.boat::after{filter:drop-shadow(0 0 3px currentColor)}
+  .tgt.boat.alert{animation:boatAlert .3s ease-in-out infinite alternate}
+  @keyframes boatAlert{from{opacity:.6}to{opacity:1}}
   .tgt.weak{opacity:1;animation:weak .7s ease-in-out infinite alternate}
   .tgt.weak::before,.tgt.weak::after{border-width:2px;border-color:#ffb36b;filter:drop-shadow(0 0 4px rgba(255,170,80,.9))}
   .tgt.weak span{color:#ffd2a0;font-weight:600}
@@ -170,7 +175,7 @@
   @keyframes armor{0%{opacity:1;margin-top:0}60%{opacity:1}100%{opacity:0;margin-top:-26px}}
   #threats{position:absolute;inset:0;pointer-events:none}
   .thr{position:absolute;left:0;top:0;width:36px;height:36px;margin:-18px 0 0 -18px;display:none;filter:drop-shadow(0 0 5px rgba(255,40,20,.95))}
-  .thr::before{content:"";position:absolute;inset:0;background:#ff4a30;clip-path:polygon(100% 50%,20% 4%,42% 50%,20% 96%);animation:thr .38s ease-in-out infinite alternate}
+  .thr::before{content:"";position:absolute;inset:0;background:currentColor;clip-path:polygon(100% 50%,20% 4%,42% 50%,20% 96%);animation:thr .38s ease-in-out infinite alternate}
   .thr::after{content:"";position:absolute;inset:0;background:rgba(255,120,90,.55);clip-path:polygon(62% 50%,0 14%,16% 50%,0 86%);animation:thr .38s ease-in-out .19s infinite alternate}
   @keyframes thr{from{opacity:.45;transform:translateX(-3px)}to{opacity:1;transform:translateX(2px)}}
   #keys{position:absolute;left:calc(16px + var(--sl));bottom:calc(14px + var(--sb));font-size:9px;letter-spacing:.12em;line-height:1.85;color:var(--dim);
