@@ -339,6 +339,7 @@ export class Ship {
     this.diveT = 0;
     this._amber = new THREE.Color(1.0, 0.62, 0.22);
     this._cold = new THREE.Color(0.25, 1.0, 0.92);
+    this._steam = new THREE.Color(0xe8f4ff);   // round 6: water flashed to steam/plasma whitens the exhaust
     this.glowColor = new THREE.Color();
   }
   add(geo, mat) {
@@ -346,8 +347,8 @@ export class Ship {
     this.body.add(m);
     return m;
   }
-  // dive: 0 = flight config, 1 = submerged config (~0.4 s transition)
-  animate(dt, diving, boost, time, power = 1) {
+  // dive: 0 = flight config, 1 = submerged config (~0.4 s transition); steam 0..1 = cargo water being burned
+  animate(dt, diving, boost, time, power = 1, steam = 0) {
     const target = diving ? 1 : 0;
     const k = dt / 0.4;
     this.diveT += Math.max(-k, Math.min(k, target - this.diveT));
@@ -358,7 +359,7 @@ export class Ship {
     this.shield.position.set(0, lerp(0.95, 0, e), lerp(1.6, 0, e));
     for (const ir of this.irises) ir.scale.setScalar(lerp(1, 0.72, e));
     const flick = 0.92 + 0.08 * Math.sin(time * 60) + boost * 0.25;
-    this.glowColor.copy(this._amber).lerp(this._cold, e);
+    this.glowColor.copy(this._amber).lerp(this._cold, e).lerp(this._steam, steam * 0.5);
     // HDR engine discs (>1 => bloom)
     this.glowMat.color.copy(this.glowColor).multiplyScalar(flick * (1.15 + boost * 0.5) * (0.4 + 0.6 * power));
     this.plumeMat.uniforms.uTime.value = time;

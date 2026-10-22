@@ -102,6 +102,8 @@ export class Audio {
     }
     // boost: an airy rising rush (no low growl)
     this.boostAir = this.loopNoise('bandpass', 1800, 0.9, this.engBus);
+    // round 6: soft steam hiss while the engines burn cargo water (on the ducked engine bus: never masks the guns)
+    this.steamHiss = this.loopNoise('bandpass', 5200, 0.9, this.engBus);
     this.previewUntil = 0;
     // ---- environment beds
     this.wind = this.loopNoise('bandpass', 900, 0.6);
@@ -181,6 +183,13 @@ export class Audio {
     this.set(this.verbIn.gain, underwater ? 0.15 : 0.55);
     this.set(this.echoIn.gain, underwater ? 0 : 0.35);
     this.lastProx = prox;
+  }
+  // steam 0..1: water being flashed in the engines (quiet airy hiss with a slow flutter)
+  steam(v) {
+    if (!this.ctx) return;
+    const fl = 0.85 + 0.15 * Math.sin(this.ctx.currentTime * 7.3);
+    this.set(this.steamHiss.g.gain, v * 0.05 * fl, 0.12);
+    this.set(this.steamHiss.fl.frequency, 4600 + v * 1400, 0.2);
   }
   // ---------------------------------------------------------------- engine presets
   setEngine(name) {

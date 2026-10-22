@@ -26,6 +26,15 @@ const AUTOPILOT = params.get('autopilot') === '1';
 const NOBOOST = params.get('noboost') === '1';   // autopilot at cruise speed (timing tests)
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 document.body.classList.toggle('touch', isTouch);
+// Round 6: water as reaction mass. The air-breathing plasma engines flash cargo water into steam/plasma when the
+// air is not enough: on BOOST, and in thin air over a sector whose mast was shot. Rates in cargo-% per second.
+const BURN_BOOST = 0.15;     // × G.boost (0..1): ~60–100 s of boost over the 2:36 route ≈ 9–15 % of the tank
+const BURN_THIN = 0.35;      // extra auto-draw in thin air (mast down), above water only
+const BURN_THIN_BOOST = 1.6; // boost burn multiplier in thin air
+const BURN_FLOOR = 5;        // burn alone never drains the tank below this (damage still can)
+const THIN_SINK = 2.5;       // m/s gentle sink in thin air when the pilot isn't climbing
+const SHIP_BURN_MUL = 1.0;   // Cormorant / Баклан. Future ship types: Tern / Крачка 1.3, Pelican / Пеликан 0.6
+const TANK_L = 6000;         // Cormorant tank, litres
 const qParam = { low: 'low', med: 'med', medium: 'med', high: 'high' }[params.get('q')];
 
 // ------------------------------------------------------------------ renderer / scene
@@ -302,7 +311,7 @@ const barEls = (id) => ({ v: $(id).querySelector('.v'), g: $(id).querySelector('
 const hud = {
   root: $('hud'), cargo: $('tCargo'), shield: $('tShield'), health: $('tHealth'), rad: $('tRad'), score: $('tScore'), speed: $('tSpeed'), dist: $('tDist'),
   bCargo: barEls('bCargo'), bShield: barEls('bShield'), bHealth: barEls('bHealth'), bRad: barEls('bRad'), bAir: barEls('bAir'), bMark: barEls('bMark'),
-  rowCargo: $('rCargoRow'), rowShield: $('rShieldRow'), rowHealth: $('rHealthRow'),
+  rowCargo: $('rCargoRow'), burnTag: $('burnTag'), rowShield: $('rShieldRow'), rowHealth: $('rHealthRow'),
   air: $('tAir'), airBox: $('airBox'), msg: $('msg'), pop: $('pop'), toast: $('toast'), markBox: $('markBox'), markLbl: document.querySelector('#markBox .lbl span'), mark: $('tMark'), sDown: $('sDown'),
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
   dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'),
@@ -340,6 +349,7 @@ function freshState() {
     mineKills: 0, mineHits: 0, hunterKills: 0, hunterRams: 0, hunterShots: 0, boatKills: 0, navalHits: 0, boatShots: 0, ricochets: 0, armorT: 0,
     mineHinted: false, hunterHinted: false, boatHinted: false,
     relayKills: 0, relayHinted: false, blindSaid: false, noRelay: false, blockLogged: false, lockLog: [], beamSegs: 0, beamTurret: -1,
+    waterBurned: 0, waterSpilled: 0, burnRate: 0, thinAir: false, steam: 0, burnHinted: false, thinHinted: false,
   };
 }
 G = freshState();
@@ -478,6 +488,7 @@ function damage(amount, p, kind) {
     }
   }
   if (rest > 0.01) {
+    G.waterSpilled += Math.min(G.cargo, rest);
     G.cargo = Math.max(0, G.cargo - rest);
     G.hitFlash = 1;
     pulseRow(hud.rowCargo);
@@ -611,6 +622,8 @@ function updateFlight(dt) {
     let vYt;
     if (G.dive) vYt = G.y > -2 ? -20 : iy * 7;
     else vYt = G.y < 0.9 ? 16 : iy * 20;
+    // round 6: thin air (mast down) — a gentle sink when not climbing, fading out near the water (no bounce)
+    if (G.thinAir && !G.dive && iy <= 0.1 && G.y >= 0.9) vYt -= THIN_SINK * clamp((G.y - 3) / 4, 0, 1);
     G.vY += (vYt - G.vY) * damp(6, dt);
     if (G.s > PAD_B - 330) { G.phase = 'landing'; G.phaseT = 0; G.dive = false; showMsg('SETTLEMENT B — AUTO-LANDING', 'ПОСЕЛЕНИЕ Б — АВТОПОСАДКА', 2.5, '#9ff2d8'); }
   }
@@ -1899,6 +1912,33 @@ function updateHazards(dt) {
     G.shake = Math.min(1, G.shake + 0.35);
   }
   G.wasUnder = G.underwater;
+  updateBurn(dt);
+}
+
+// round 6: engines burn cargo water as backup reaction mass (boost, thin air); hydrojet underwater burns none
+function updateBurn(dt) {
+  const z = zoneAt(G.s);
+  const air = G.phase === 'flight' && !G.underwater;
+  G.thinAir = air && !!(z && !z.shielded);
+  let rate = 0;
+  if (air) {
+    const boost = G.boost > 0.05 && !G.dive ? BURN_BOOST * G.boost : 0;
+    rate = (G.thinAir ? BURN_THIN + boost * BURN_THIN_BOOST : boost) * SHIP_BURN_MUL;
+  }
+  const d = Math.min(rate * dt, Math.max(0, G.cargo - BURN_FLOOR));
+  G.burnRate = d > 0 ? rate : 0;
+  if (d > 0) { G.cargo -= d; G.waterBurned += d; }
+  // exhaust steam amount (0..1): full in thin air, follows boost otherwise
+  const st = G.burnRate > 0 ? (G.thinAir ? Math.max(0.75, G.boost) : clamp(G.boost * 1.1, 0, 1)) : 0;
+  G.steam += (st - G.steam) * damp(4, dt);
+  if (G.burnRate > 0 && G.boost > 0.05 && !G.burnHinted) {
+    G.burnHinted = true;
+    toast('<b>Boost burns cargo water as reaction mass.</b><br><i>Форсаж тратит воду из цистерны как рабочее тело.</i>', 5);
+  }
+  if (G.thinAir && !G.thinHinted) {
+    G.thinHinted = true;
+    toast('<b>Thin air over a downed mast — ship sinks, engines draw water.</b><br><i>Над сбитой мачтой воздух жидкий: корабль проседает, двигатели пьют воду.</i>', 5.5);
+  }
 }
 
 // ------------------------------------------------------------------ ship transform + fx
@@ -1921,7 +1961,7 @@ function updateShipVisual(dt, time) {
   ship.body.position.z = G.jolt * G.jolt * 3 + Math.sin(Math.min(1, 1 - G.kick) * Math.PI) * (G.kick > 0 ? 0.5 : 0);
   const running = G.phase !== 'start' && G.phase !== 'landed' && G.phase !== 'result';
   const power = running ? 1 + G.boost * 0.6 : 0.35;
-  ship.animate(dt, G.dive || G.underwater, G.boost, time, running ? 1 : 0.25);
+  ship.animate(dt, G.dive || G.underwater, G.boost, time, running ? 1 : 0.25, G.steam);
   shipFwd.set(0, 0, -1).applyQuaternion(ship.group.quaternion);
   const fwdV = G.speed * (1 - G.dip);
   shipVel.set(SF.tx * fwdV + SF.rx * G.vLat, G.vY, SF.tz * fwdV + SF.rz * G.vLat);
@@ -1950,6 +1990,12 @@ function updateShipVisual(dt, time) {
     } else {
       sparks.emit(nozW.x, nozW.y, nozW.z, shipVel.x * 0.4 - shipFwd.x * 20, shipVel.y * 0.4 - shipFwd.y * 20, shipVel.z * 0.4 - shipFwd.z * 20,
         0.12 + G.boost * 0.1, 1.6, 0.5, gc.r, gc.g * 0.75, gc.b * 0.5, 0.35, 0, 0);
+      // round 6: burning cargo water — soft white steam puffs trailing the nozzles
+      if (G.steam > 0.08 && Math.random() < G.steam * 0.8) {
+        const j = () => (Math.random() - 0.5) * 0.8;
+        mist.emit(nozW.x + j(), nozW.y + j() - 0.2, nozW.z + j(), shipVel.x * 0.84 - shipFwd.x * 6 + j() * 3, shipVel.y * 0.8 + 0.6 + Math.random(), shipVel.z * 0.84 - shipFwd.z * 6 + j() * 3,
+          0.8 + Math.random() * 0.6, 1.1, 4.6 + Math.random() * 2, 0.93, 0.97, 1, 0.3 + 0.25 * G.steam, -0.6, 0.6);
+      }
     }
   }
   // wing-tip nav lights
@@ -2282,6 +2328,13 @@ function updateHUD(dt, time) {
   setBar(hud.bAir, G.air / 60);
   setBar(hud.bMark, G.mark);
   hud.rowShield.classList.toggle('regen', G.regen);
+  // round 6: water-burn tag under the cargo gauge (steam-white, not an alarm) + shimmer on the bar
+  const burning = G.burnRate > 0, thinTag = burning && G.thinAir;
+  if (burning !== hud.rowCargo.classList.contains('burn')) hud.rowCargo.classList.toggle('burn', burning);
+  if (burning && thinTag !== hud.burnTag.classList.contains('thin')) {
+    hud.burnTag.classList.toggle('thin', thinTag);
+    hud.burnTag.innerHTML = thinTag ? 'THIN AIR · WATER BURN<i>РАЗРЕЖЕННЫЙ ВОЗДУХ · РАСХОД ВОДЫ</i>' : 'WATER BURN<i>РАСХОД ВОДЫ</i>';
+  }
   hud.rowShield.classList.toggle('down', G.shield <= 0);
   const locked = G.lock.phase === 'laser' || G.lock.phase === 'volley';
   // in a blind section (its relays are down) the mark has nowhere to go: the bar reads NO RELAY
@@ -2331,7 +2384,7 @@ function updateHUD(dt, time) {
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.1;
-  hud.cargo.textContent = Math.ceil(G.cargo) + '%';
+  hud.cargo.textContent = G.burnRate > 0 ? G.cargo.toFixed(1) + '%' : Math.ceil(G.cargo) + '%';
   hud.shield.textContent = G.shield > 0 ? Math.ceil(G.shield) + '%' : 'DOWN';
   hud.health.textContent = Math.ceil(Math.max(0, G.health)) + '%';
   hud.rad.textContent = G.rad > 0.05 ? (G.rad * 4.2).toFixed(1) + ' Sv/h' : 'SHIELDED';
@@ -2356,6 +2409,11 @@ function showResult() {
   const mm = Math.floor(G.t / 60), ss = (G.t % 60).toFixed(1).padStart(4, '0');
   $('rTime').textContent = `${mm}:${ss}`;
   $('rCargo').textContent = Math.round(G.cargo) + '%';
+  const litres = (pct) => Math.round(pct / 100 * TANK_L / 10) * 10;
+  const fmtL = (l) => String(l).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009') + '\u00a0л';
+  const deliv = ok ? G.cargo : 0;
+  $('rWater').textContent = `${fmtL(litres(deliv))} (${Math.round(deliv)}%)`;
+  $('rBurned').textContent = `${fmtL(litres(G.waterBurned))} (${G.waterBurned.toFixed(1)}%)`;
   $('rHealth').textContent = Math.round(Math.max(0, G.health)) + '%';
   $('rTargets').textContent = `${G.kills} / ${N_DRONE_REAL + BEACONS.length + TURRETS.length}`;
   $('rMasts').textContent = `${G.mastsBroken}`;
@@ -2604,6 +2662,7 @@ function loop() {
   updateHUD(dt, time);
   updateAudioScene();
   audio.update(G.speed * (1 - G.dip), G.boost, camUnder, G.skim || 0, G.phase !== 'start' && G.phase !== 'result', G.prox || 0, G.y);
+  audio.steam(G.phase === 'flight' && !camUnder ? G.steam : 0);
   renderer.info.reset();
   post.render(time);
   if (++frames === 2) document.getElementById('fade').classList.add('off');
@@ -2625,7 +2684,9 @@ window.__lethe = {
     t: +G.t.toFixed(2), speed: +G.speed.toFixed(2), distToB: +Math.max(0, PAD_B - G.s).toFixed(1), cargo: +G.cargo.toFixed(1), hull: +G.cargo.toFixed(1),
     health: +Math.max(0, G.health).toFixed(1), air: +G.air.toFixed(1), score: G.phase === 'result' ? G.finalScore : G.score,
     underwater: G.underwater, phase: G.phase, outcome: G.outcome, s: +G.s.toFixed(1), lat: +G.lat.toFixed(2), y: +G.y.toFixed(2),
-    dive: G.dive, radiation: +G.rad.toFixed(3), mastsBroken: G.mastsBroken, kills: G.kills,
+    dive: G.dive, radiation: +G.rad.toFixed(3),
+    waterBurned: +G.waterBurned.toFixed(3), waterSpilled: +G.waterSpilled.toFixed(2), burnRate: +G.burnRate.toFixed(3), thinAir: G.thinAir, steam: +G.steam.toFixed(2),
+    burnTag: hud.rowCargo.classList.contains('burn'), mastsBroken: G.mastsBroken, kills: G.kills,
     rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol, engineSound: audio.engine,
     aim: aimObj ? (TURRETS.includes(aimObj) ? 'turret' : DRONES.includes(aimObj) ? 'drone' : MINES.includes(aimObj) ? 'mine' : HUNTERS.includes(aimObj) ? 'hunter'
       : BOATS.includes(aimObj) ? 'boat' : 'relay') : null, turretKills: G.turretKills,
@@ -2649,6 +2710,8 @@ window.__lethe = {
   input,
   debug: {
     breakMast: (i) => breakMast(MASTS[i]),
+    setCargo: (v) => { G.cargo = clamp(v, 0, 100); disp.cargo = disp.gc = G.cargo; },
+    zones: () => ZONES.map((z) => ({ i: z.idx, s0: +z.s0.toFixed(0), s1: +z.s1.toFixed(0), shielded: z.shielded, mast: MASTS.findIndex((m) => m.zone === z) })),
     masts: () => MASTS.map((m) => ({ s: m.s, alive: m.alive })),
     spawnDrone: (ahead = 110, lat = 0, y = 18) => {
       const d = DRONES.find((x) => x.debug && !x.alive) || DRONES[DRONES.length - 1];
