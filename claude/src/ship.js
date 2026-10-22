@@ -1,8 +1,10 @@
-// Procedural "Cormorant" (БАКЛАН): blunt armoured wedge nose, canopy, short thick wings,
-// two big rear engine pods with amber glow, ochre hazard stripes, PBR-ish materials,
-// energy shield bubble and exhaust plumes. Nose points to -Z. ~6k triangles.
+// "Cormorant" (БАКЛАН). Round 7: the approved Blender model (assets/ship/baklan_lod0/1.glb, THREE.LOD) replaces
+// the procedural hull once loaded; the procedural ship below (blunt armoured wedge nose, canopy, short thick wings,
+// two rear engine pods, ~6k triangles) is shown until then and stays as the fallback if the GLB fails.
+// Shared by both: energy shield bubble, exhaust plumes, dive armour, engine glow colour logic. Nose points to -Z.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { lerp, sanitizeNormals } from './util.js';
 import { shipTextures } from './textures.js';
 
@@ -147,6 +149,10 @@ void main(){
   float a = pow(along, 1.6) * pow(vVd, 1.5) * (0.6 + 0.6 * n) * uPow;
   gl_FragColor = vec4(uCol * a, 1.0);
 }`;
+
+const GLB_URL = [new URL('../assets/ship/baklan_lod0.glb', import.meta.url).href, new URL('../assets/ship/baklan_lod1.glb', import.meta.url).href];
+const MODEL_SCALE = 1.05;    // the 14.2 m model -> 14.9 body units, span 11.3 (procedural: hull 15.2 / 16.3 with barrels, span 11.4)
+export const LOD_FAR = 70;   // camera distance (m) where LOD1 (~3.9k tris) takes over from LOD0 (~17k)
 
 export class Ship {
   constructor(envMap) {
@@ -336,6 +342,18 @@ export class Ship {
     body.add(this.bubble);
 
     body.traverse((o) => { if (o.isMesh && o.material !== this.shieldMat && o.material !== this.plumeMat && o.material !== this.glowMat && o.material !== lamp) { o.castShadow = true; } });
+    // everything but the plumes + bubble is the procedural hull, dropped when the GLB arrives
+    this._proc = body.children.filter((o) => o !== this.bubble && !this.plumes.includes(o));
+    this._plumeZ = 7.4;
+    this._plumeR = 1;
+    this.lifts = [];                                  // ventral lift-engine glow points (GLB only)
+    this.rocketPort = new THREE.Vector3(0, -1.15, -5.5);
+    this.shipModel = 'procedural';
+    this._env = envMap;
+    this._knee = knee;
+    this._tier = null;
+    this._levels = [null, null];                      // built LOD0 / LOD1 groups
+    this._req = [false, false];
     this.diveT = 0;
     this._amber = new THREE.Color(1.0, 0.62, 0.22);
     this._cold = new THREE.Color(0.25, 1.0, 0.92);
@@ -347,25 +365,198 @@ export class Ship {
     this.body.add(m);
     return m;
   }
+
+  // ---------------------------------------------------------------- round 7: Blender model + LOD
+  // main.js calls this on every quality change: LOD1 is always fetched (small), LOD0 only above 'low';
+  // 'low' pins LOD1, the other tiers switch at LOD_FAR metres of camera distance
+  setQuality(tier) {
+    this._tier = tier;
+    this._request(1);
+    if (tier !== 'low') this._request(0);
+    this._lodMode();
+  }
+  _request(i) {
+    if (this._req[i]) return;
+    this._req[i] = true;
+    const loader = Ship.loader || (Ship.loader = new GLTFLoader());
+    loader.load(GLB_URL[i], (gltf) => {
+      try {
+        this._levels[i] = this._build(gltf.scene);
+        this._install();
+      } catch (err) { console.warn('ship: GLB LOD' + i + ' not used', err); }
+    }, undefined, (err) => console.warn('ship: GLB LOD' + i + ' failed to load, keeping the procedural hull', err));
+  }
+  // glTF material -> game look: display-referred colours (ColorManagement is off; the grade pass decodes), scene
+  // env map, the same highlight soft-knee as the procedural hull; EmissiveOrange becomes the shared engine material
+  _mat(m) {
+    if (m.name === 'EmissiveOrange') {
+      if (!this.engineMat) this.engineMat = new THREE.MeshStandardMaterial({ color: 0x1c0e06, roughness: 0.4, metalness: 0, emissive: 0xffa040, envMap: this._env, envMapIntensity: 0.3 });
+      return this.engineMat;
+    }
+    if (m.userData.r7) return m;
+    m.userData.r7 = true;
+    m.color.convertLinearToSRGB();
+    if (m.map) m.map.colorSpace = THREE.NoColorSpace;
+    m.envMap = this._env;
+    m.envMapIntensity = m.name === 'Glass' ? 1.4 : 1.0;
+    // the Blender renders had a bright sky dome; our canyon env is dim, so let more diffuse through on armour
+    if (m.name !== 'Glass') m.metalness *= 0.55;
+    m.onBeforeCompile = this._knee;
+    if (m.transparent) { m.depthWrite = false; m.polygonOffset = true; m.polygonOffsetFactor = -2; m.polygonOffsetUnits = -2; }
+    return m;
+  }
+  // one draw call per material: bake node transforms (into `space`) and merge
+  _merged(byMat, parent) {
+    for (const [mat, geos] of byMat) {
+      const g = geos.length > 1 ? mergeGeometries(geos) : geos[0];
+      for (const x of (g ? [g] : geos)) {
+        const mesh = new THREE.Mesh(x, this._mat(mat));
+        mesh.castShadow = mesh.material !== this.engineMat && !mesh.material.transparent;
+        if (mesh.material.transparent) mesh.renderOrder = 1;
+        parent.add(mesh);
+      }
+    }
+  }
+  _build(root) {
+    root.updateMatrixWorld(true);
+    const used = new Set(), M = new THREE.Matrix4(), inv = new THREE.Matrix4();
+    const node = (n) => root.getObjectByName(n);
+    const collect = (obj, space, byMat) => obj.traverse((o) => {
+      if (!o.isMesh || used.has(o)) return;
+      used.add(o);
+      if (space) M.multiplyMatrices(space, o.matrixWorld); else M.copy(o.matrixWorld);
+      const g = o.geometry.clone().applyMatrix4(M);
+      if (!byMat.has(o.material)) byMat.set(o.material, []);
+      byMat.get(o.material).push(g);
+    });
+    const group = new THREE.Group();
+    // wings on their own pivots (node origin = root), tips -> nav lights in pivot space
+    const wings = [], tips = [];
+    for (const side of ['L', 'R']) {
+      const wn = node('Wing_' + side), piv = new THREE.Group(), byMat = new Map();
+      piv.position.setFromMatrixPosition(wn.matrixWorld);
+      inv.copy(wn.matrixWorld).invert();
+      collect(wn, inv, byMat);
+      let ext = 0;
+      for (const gs of byMat.values()) for (const g of gs) { const p = g.attributes.position; for (let k = 0; k < p.count; k++) ext = Math.max(ext, side === 'L' ? -p.getX(k) : p.getX(k)); }
+      const tip = new THREE.Vector3(); let n = 0;
+      for (const gs of byMat.values()) for (const g of gs) {
+        const p = g.attributes.position;
+        for (let k = 0; k < p.count; k++) if ((side === 'L' ? -p.getX(k) : p.getX(k)) > ext - 0.08) { tip.x += p.getX(k); tip.y += p.getY(k); tip.z += p.getZ(k); n++; }
+      }
+      tips.push(tip.divideScalar(n));
+      this._merged(byMat, piv);
+      group.add(piv);
+      wings.push(piv);
+    }
+    // anchors (model space)
+    const box = (n) => new THREE.Box3().setFromObject(node(n));
+    const ctr = (b) => b.getCenter(new THREE.Vector3());
+    const nozzles = ['MainNozzle_L', 'MainNozzle_R'].map(box);
+    const lifts = ['LiftEngine_L', 'LiftEngine_R', 'LiftEngine_C'].map(box).map((b) => ctr(b).setY(b.min.y + 0.05));
+    const guns = new Map(); collect(node('Guns'), null, guns);
+    const gunGeos = [...guns.values()].flat();
+    let zMin = Infinity;
+    for (const g of gunGeos) { const p = g.attributes.position; for (let k = 0; k < p.count; k++) zMin = Math.min(zMin, p.getZ(k)); }
+    const muz = [new THREE.Vector3(), new THREE.Vector3()], mn = [0, 0];
+    for (const g of gunGeos) {
+      const p = g.attributes.position;
+      for (let k = 0; k < p.count; k++) if (p.getZ(k) < zMin + 0.03) { const i = p.getX(k) < 0 ? 0 : 1; muz[i].x += p.getX(k); muz[i].y += p.getY(k); muz[i].z += p.getZ(k); mn[i]++; }
+    }
+    muz.forEach((v, i) => v.divideScalar(mn[i] || 1).setZ(zMin - 0.1));
+    const canopy = new Map(); collect(node('Canopy'), null, canopy);
+    const canopyGeo = mergeGeometries([...canopy.values()].flat().map((g) => { const c = new THREE.BufferGeometry(); c.setAttribute('position', g.attributes.position); c.setAttribute('normal', g.attributes.normal); c.setIndex(g.index); return c; }));
+    const tank = box('Tank');
+    const bounds = new THREE.Box3().setFromObject(root);
+    // the rest of the ship, merged per material
+    const byMat = new Map();
+    for (const [m, gs] of guns) byMat.set(m, gs.slice());
+    for (const [m, gs] of canopy) byMat.set(m, (byMat.get(m) || []).concat(gs));
+    collect(root, null, byMat);
+    this._merged(byMat, group);
+    return {
+      group, wings, tips, bounds, canopyGeo, muzzles: muz, lifts,
+      nozzles: nozzles.map((b) => ({ p: ctr(b).setZ(b.max.z - 0.15), exit: b.max.z, r: (b.max.x - b.min.x) / 2 })),
+      rocket: ctr(tank).setY(tank.min.y - 0.1).setZ(tank.min.z + 0.8),
+    };
+  }
+  _install() {
+    const L = this._levels, first = L[0] || L[1];
+    if (!first) return;
+    const S = MODEL_SCALE, toBody = (v) => v.clone().multiplyScalar(S);
+    if (!this.model) {
+      for (const o of this._proc) { this.body.remove(o); if (o.geometry) o.geometry.dispose(); }
+      this.model = new THREE.Group();
+      this.model.scale.setScalar(S);
+      this.body.add(this.model);
+      this.lod = new THREE.LOD();
+      this.model.add(this.lod);
+      // anchors: engine exits, lift glows, gun tips, rocket rail, nav lights (pivot space), shield fit
+      this.nozzles = first.nozzles.map((n) => toBody(n.p));
+      this._plumeZ = first.nozzles[0].exit * S;
+      this._plumeR = (first.nozzles[0].r * 0.8 * S) / 0.85;
+      this.plumes.forEach((p, i) => p.position.set(this.nozzles[i].x, this.nozzles[i].y, this._plumeZ + 3));
+      this.lifts = first.lifts.map(toBody);
+      this.muzzles = first.muzzles.map(toBody);
+      this.rocketPort = toBody(first.rocket);
+      this.navLights = first.tips;
+      const b = first.bounds, c = toBody(b.getCenter(new THREE.Vector3())), h = toBody(b.getSize(new THREE.Vector3()).multiplyScalar(0.5));
+      this.bubble.scale.set(h.x * 1.02, Math.max(h.y * 1.45, 2.9), h.z * 1.17);
+      this.bubble.position.copy(c);
+      // dive armour: the canopy shape, a size up, dark metal; rises out of the spine behind the canopy
+      const g = first.canopyGeo;
+      g.computeBoundingBox();
+      const cc = g.boundingBox.getCenter(new THREE.Vector3()), cs = g.boundingBox.getSize(new THREE.Vector3());
+      g.translate(-cc.x, -cc.y, -cc.z).scale(1.1, 1.1, 1.05);
+      this.shield = new THREE.Mesh(g, this.mats.dark);
+      this.shield.castShadow = true;
+      this.shield.userData = { rest: cc, h: cs.y, len: cs.z };
+      this.shield.visible = false;
+      this.model.add(this.shield);
+      this.shipModel = 'glb';
+    }
+    // (re)build the LOD levels from what has loaded so far
+    for (const lv of [...this.lod.levels]) this.lod.remove(lv.object);
+    this.lod.levels.length = 0;
+    if (L[0]) this.lod.addLevel(L[0].group, 0);
+    if (L[1]) this.lod.addLevel(L[1].group, L[0] ? LOD_FAR : 0);
+    this.wings = (L[0] || L[1]).wings;
+    this._lodMode();
+  }
+  _lodMode() {
+    if (!this.lod) return;
+    const L = this._levels, pin = this._tier === 'low' && L[1];
+    this.lod.autoUpdate = !pin;
+    if (pin) { if (L[0]) L[0].group.visible = false; L[1].group.visible = true; }
+  }
   // dive: 0 = flight config, 1 = submerged config (~0.4 s transition); steam 0..1 = cargo water being burned
   animate(dt, diving, boost, time, power = 1, steam = 0) {
     const target = diving ? 1 : 0;
     const k = dt / 0.4;
     this.diveT += Math.max(-k, Math.min(k, target - this.diveT));
     const d = this.diveT, e = d * d * (3 - 2 * d);
-    this.wings[0].rotation.y = -e * 0.61;   // 35 deg sweep back
-    this.wings[1].rotation.y = e * 0.61;
-    this.shield.scale.set(1, lerp(0.2, 1, e), lerp(0.25, 1, e));
-    this.shield.position.set(0, lerp(0.95, 0, e), lerp(1.6, 0, e));
+    if (this.shipModel === 'procedural') {
+      this.wings[0].rotation.y = -e * 0.61;   // 35 deg sweep back
+      this.wings[1].rotation.y = e * 0.61;
+      this.shield.scale.set(1, lerp(0.2, 1, e), lerp(0.25, 1, e));
+      this.shield.position.set(0, lerp(0.95, 0, e), lerp(1.6, 0, e));
+    } else {
+      // GLB: wings stay put (a sweep would cut through the lift pods); the armour shell rises out of the spine
+      const a = this.shield, r = a.userData.rest;
+      a.visible = e > 0.01;
+      a.scale.set(lerp(0.7, 1, e), lerp(0.15, 1, e), lerp(0.3, 1, e));
+      a.position.set(r.x, r.y - (1 - e) * a.userData.h * 0.45, r.z + (1 - e) * a.userData.len * 0.55);
+    }
     for (const ir of this.irises) ir.scale.setScalar(lerp(1, 0.72, e));
     const flick = 0.92 + 0.08 * Math.sin(time * 60) + boost * 0.25;
     this.glowColor.copy(this._amber).lerp(this._cold, e).lerp(this._steam, steam * 0.5);
     // HDR engine discs (>1 => bloom)
     this.glowMat.color.copy(this.glowColor).multiplyScalar(flick * (1.15 + boost * 0.5) * (0.4 + 0.6 * power));
+    if (this.engineMat) this.engineMat.emissive.copy(this.glowMat.color);
     this.plumeMat.uniforms.uTime.value = time;
     this.plumeMat.uniforms.uCol.value.copy(this.glowColor).multiplyScalar(1.2);
     this.plumeMat.uniforms.uPow.value = power * (0.22 + boost * 0.4) * (1 - e * 0.6);
-    for (const p of this.plumes) { p.scale.set(1, 0.7 + boost * 0.7 + 0.08 * Math.sin(time * 47), 1); p.position.z = 7.4 + 3 * p.scale.y; }
+    for (const p of this.plumes) { p.scale.set(this._plumeR, 0.7 + boost * 0.7 + 0.08 * Math.sin(time * 47), this._plumeR); p.position.z = this._plumeZ + 3 * p.scale.y; }
     this.mats.lamp.color.setRGB(1.5, 0.8, 0.25).multiplyScalar(0.8 + 0.2 * Math.sin(time * 3));
   }
 }

@@ -1,0 +1,62 @@
+{
+  "units": "metres",
+  "up": "+Y (glTF)",
+  "forward": "-Z (glTF)",
+  "com_shift_blender": [
+    -0.0,
+    -1.124,
+    0.8817
+  ],
+  "lod0": {
+    "Hull": 4188,
+    "Canopy": 918,
+    "Wing_L": 812,
+    "Wing_R": 812,
+    "Pod_L": 1552,
+    "Pod_R": 1552,
+    "Tank": 1852,
+    "LiftEngine_L": 360,
+    "LiftEngine_R": 360,
+    "LiftEngine_C": 360,
+    "MainNozzle_L": 1760,
+    "MainNozzle_R": 1760,
+    "Guns": 584,
+    "Emblem_R": 32,
+    "Emblem_L": 32
+  },
+  "lod1": {
+    "Hull": 964,
+    "Canopy": 274,
+    "Wing_L": 242,
+    "Wing_R": 242,
+    "Pod_L": 278,
+    "Pod_R": 278,
+    "Tank": 370,
+    "LiftEngine_L": 108,
+    "LiftEngine_R": 108,
+    "LiftEngine_C": 108,
+    "MainNozzle_L": 386,
+    "MainNozzle_R": 386,
+    "Guns": 146
+  },
+  "lod0_total": 16934,
+  "bbox_blender_min": [
+    -5.393,
+    -6.454,
+    -2.035
+  ],
+  "bbox_blender_max": [
+    5.393,
+    7.746,
+    1.756
+  ],
+  "length_m": 14.2,
+  "span_m": 10.786,
+  "height_m": 3.791,
+  "lod1_total": 3890,
+  "glb_triangles": {
+    "baklan_game.glb": 16934,
+    "baklan_game_lod1.glb": 3876,
+    "baklan_game_lods.glb": 20810
+  }
+}

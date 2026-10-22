@@ -130,6 +130,7 @@ let quality = qParam || (isTouch ? 'med' : 'high');
 function applyQuality(name) {
   quality = name;
   post.apply(name, innerWidth, innerHeight, DEVICE_DPR);
+  ship.setQuality(name);
   const T = TIERS[name];
   for (const c of chunks) for (const m of c.children) if (m.userData.detail) m.visible = T.detail;
   shafts.visible = T.name !== 'low';
@@ -832,7 +833,7 @@ function fireRocket() {
   if (!r) return;
   G.rockets--; G.rocketsFired++; G.rocketCd = ROCKET_CD;
   ship.body.updateMatrixWorld();
-  const p = ship.body.localToWorld(V1.set(0, -1.15, -5.5));
+  const p = ship.body.localToWorld(V1.copy(ship.rocketPort));
   r.on = true; r.p.copy(p); r.q.copy(p); r.life = 3.2; r.s = G.s; r.age = 0; r.from = `${G.s.toFixed(0)}/${G.lat.toFixed(0)}/${G.y.toFixed(0)}`;
   const at = aimTarget(p, 1.4);   // rockets are deliberate: a slightly wider lock than the cannon
   r.target = at && at.kind !== 'beacon' ? at.obj : findRocketTarget(p, shipFwd);
@@ -1998,6 +1999,11 @@ function updateShipVisual(dt, time) {
       }
     }
   }
+  // ventral lift engines (GLB model): small glows under the pods / belly
+  for (const lf of ship.lifts) {
+    nozW.copy(lf).applyMatrix4(ship.body.matrixWorld);
+    glows.add(nozW.x, nozW.y, nozW.z, gc.r, gc.g * 0.8, gc.b * 0.6, 0.3 * power, 1.3 * power);
+  }
   // wing-tip nav lights
   if (running) for (let i = 0; i < 2; i++) {
     nozW.copy(ship.navLights[i]).applyMatrix4(ship.wings[i].matrixWorld);
@@ -2041,6 +2047,7 @@ function updateShipVisual(dt, time) {
 // ------------------------------------------------------------------ camera
 let fovCur = 68;
 const CAM_MARGIN = 5;
+let closeCam = null;
 function updateCamera(dt, time) {
   const under = G.underwater;
   const start = G.phase === 'start';
@@ -2098,6 +2105,13 @@ function updateCamera(dt, time) {
   }
   camera.lookAt(camLook);
   camera.rotateZ(G.roll * 0.22);
+  if (closeCam) {
+    // debug close-up (test hook only): orbit the ship in its own frame, az 0 = from behind, el in degrees
+    const { az, el, dist } = closeCam;
+    V3.set(Math.sin(az * DEG) * Math.cos(el * DEG), Math.sin(el * DEG), Math.cos(az * DEG) * Math.cos(el * DEG)).multiplyScalar(dist);
+    camera.position.copy(shipPos).add(V3.applyQuaternion(ship.group.quaternion));
+    camera.lookAt(shipPos);
+  }
   const fovT = 64 + clamp((G.speed - 60) * 0.18, -6, 8) + G.boost * 12;
   fovCur += (fovT - fovCur) * damp(3, dt);
   if (Math.abs(camera.fov - fovCur) > 0.05) { camera.fov = fovCur; camera.updateProjectionMatrix(); }
@@ -2702,7 +2716,7 @@ window.__lethe = {
     markers: tgtEls.filter((m) => m.el.style.display === 'block').length, legend: hud.keys.classList.contains('on'),
     shield: +G.shield.toFixed(1), mark: +G.mark.toFixed(3), spotters: G.spotters, lock: G.lock.phase,
     turretShotsFired: G.turretShotsFired, ebLog: G.ebLog.slice(-6), rkLog: G.rkLog.slice(-4), turretHits: G.turretHits, quality, fps: Math.round(fps),
-    camDist: +camera.position.distanceTo(shipPos).toFixed(2), shipFrac: shipFrac(), camWallGap: camGap(), drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
+    camDist: +camera.position.distanceTo(shipPos).toFixed(2), shipFrac: shipFrac(), camWallGap: camGap(), drawCalls: renderer.info.render.calls, shipModel: ship.shipModel, triangles: renderer.info.render.triangles,
   }),
   start: startGame,
   retry: () => { reset(); startGame(); },
@@ -2774,6 +2788,20 @@ window.__lethe = {
     },
     post, scene,
     turrets: () => TURRETS.map((t) => ({ s: +t.s.toFixed(0), lat: +t.lat.toFixed(1), y: +t.y.toFixed(1), alive: t.alive })),
+    // round 7 model checks: anchors in world space, LOD state, engine emissive, last muzzle flash point
+    shipInfo: () => {
+      ship.group.updateMatrixWorld();
+      const w = (v) => ship.body.localToWorld(v.clone()).toArray().map((x) => +x.toFixed(2));
+      const lod = ship.lod;
+      return {
+        model: ship.shipModel, muzzles: ship.muzzles.map(w), muzzlesLocal: ship.muzzles.map((v) => v.toArray().map((x) => +x.toFixed(2))),
+        nozzles: ship.nozzles.map(w), lifts: ship.lifts.map(w), rocketPort: w(ship.rocketPort), lastMuzzle: G.muzzleP ? ship.body.worldToLocal(G.muzzleP.clone()).toArray().map((x) => +x.toFixed(2)) : null,
+        lod: lod ? { auto: lod.autoUpdate, levels: lod.levels.map((l) => ({ d: l.distance, vis: l.object.visible })) } : null,
+        engine: ship.engineMat ? ship.engineMat.emissive.toArray().map((x) => +x.toFixed(3)) : null, glow: ship.glowColor.toArray().map((x) => +x.toFixed(3)),
+        armour: ship.shipModel === 'glb' ? ship.shield.visible : null, bubble: ship.bubble.scale.toArray().map((x) => +x.toFixed(2)),
+      };
+    },
+    closeCam: (az = 35, el = 15, dist = 22) => { closeCam = az === null ? null : { az, el, dist }; },
     shipCam: () => ({ ship: shipPos.toArray(), cam: camera.position.toArray() }),
   },
 };
