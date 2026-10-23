@@ -1,3 +1,4 @@
+
 // Canyon spline, cross-section profile functions and procedural level layout.
 // Everything is expressed in "path space": s = distance along the canyon,
 // lat = lateral offset (right positive), y = height above river surface.
@@ -317,6 +318,24 @@ for (const [s, type, dir] of [[1020, 'smuggler', 1], [3200, 'patrol', -1], [4700
   }
   BOATS.push({ s, home: s, lat, lat0: lat, type, dir, dir0: dir, speed: type === 'patrol' ? 6 : 4.5, alive: true });
 }
+// Round 15: the two later boats (not the tutorial pair) sit over a short mine slalom.
+// Mines are moved out of the dense field so the river still holds 36. The hull's centerline
+// stays clear for the belly shot; the approach itself is not a straight dive.
+const laterBoats = BOATS.filter((b) => b.home > 4000);
+const mineDonors = MINES.filter((m) => m.s >= 5545 && m.s <= 5700).sort((a, b) => b.s - a.s);
+let mineDonor = 0;
+for (const boat of laterBoats) {
+  for (const [ds, dl, y] of [[-64, 0.6, -3.15], [-30, -12, -3.7]]) {
+    const m = mineDonors[mineDonor++];
+    if (!m) break;
+    const s = boat.home + ds;
+    const lim = underLim(s) - 1.5;
+    let lat = clamp(boat.lat + dl, -lim, lim);
+    for (let k = 0; k < 6 && nearRock(s, lat, 4); k++) lat = clamp(boat.lat + dl + (k % 2 ? 4 : -4), -lim, lim);
+    m.s = s; m.lat = lat; m.y = y;
+  }
+}
+MINES.sort((a, b) => a.s - b.s);
 
 export function resetLevel() {
   for (const z of ZONES) { z.shielded = true; z.collapse = 0; }
@@ -329,3 +348,5 @@ export function resetLevel() {
   for (const h of HUNTERS) { h.alive = !h.debug; h.s = h.home; }
   for (const b of BOATS) { b.alive = !b.debug; b.s = b.home; b.lat = b.lat0; b.dir = b.dir0; }
 }
+
+

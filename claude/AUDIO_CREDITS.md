@@ -1,3 +1,4 @@
+
 # Audio credits — LETHE / ЛЕТА "Delivery" (variant `claude`)
 
 **All sound in this build is procedural.** There are no audio sample files, no recordings and no third-party
@@ -21,6 +22,10 @@ this prototype.
 | LETHE | lock ticks rising in pitch and rate with the MARK, lock tone, targeting-laser buzz, turret launch whoosh + thump, drone whine (saw/square, vibrato, doppler pitch, stereo pan), spotter mark ping (short cold sine, one tick per cyan beam) |
 | Spotter mark ping | sine tick ≈1860 Hz (second tap of the pair ≈2280 Hz), both rising ~260 Hz as MARK fills; 36 ms decay, light level, stereo pan toward the drone, small canyon reverb. No sample files |
 | Boat sink | falling sawtooth groan ≈130→36 Hz, triangle body ≈78→26 Hz, low-pass flooding hiss 820→110 Hz, eight short sine bubble ticks; panned to the hull, canyon reverb. No sample files |
+| Boat scan | catch: sine 520→860 Hz plus triangle 1040→1480 Hz; lock: sawtooth 180→90 Hz, square 410→260 Hz, band-passed noise 880→220 Hz; hold tick: sine 760→700 Hz on the UI bus. While the beam holds, the engine low-pass closes (same presets, duller). No sample files |
+| Boat shockwave | sine sub 46→20 Hz, triangle 70→28 Hz, low-pass noise 480→70 Hz under the breach. No sample files |
 | Hazards / UI | two-tone mast-down alarm, geiger clicks (density by dose), air beeps, score chime |
 
 License: same as the rest of this prototype's code (original work).
+
+

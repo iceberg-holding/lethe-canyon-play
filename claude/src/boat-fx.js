@@ -1,3 +1,4 @@
+
 // Shared instanced water effects: fixed draw budget, no per-boat lights or textures.
 import * as THREE from 'three';
 const NOISE = `float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
@@ -80,3 +81,51 @@ export function buildBoatUnderFX(n, fogD) {
       gl_FragColor=vec4(vec3(0.8,1.0,1.0)*a*vFog,1.0);`),
   };
 }
+
+// Round 15: expanding shock rings for a boat breach. A small pool, one material each, no textures.
+export function buildShockRings(n = 6) {
+  const geo = new THREE.RingGeometry(0.84, 1, 48);
+  geo.rotateX(-Math.PI / 2);
+  const rings = [];
+  for (let i = 0; i < n; i++) {
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: { uFogD: { value: 0.0019 }, uCol: { value: new THREE.Color(1, 0.8, 0.4) }, uFade: { value: 0 } },
+      vertexShader: `varying float vFog; uniform float uFogD;
+        void main(){vec4 mv=modelViewMatrix*vec4(position,1.0); float d=max(0.0,-mv.z)*uFogD; vFog=exp(-d*d); gl_Position=projectionMatrix*mv;}`,
+      fragmentShader: `uniform vec3 uCol; uniform float uFade; varying float vFog;
+        void main(){ gl_FragColor=vec4(uCol*uFade*vFog, 1.0); }`,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.visible = false; mesh.frustumCulled = false; mesh.renderOrder = 8;
+    rings.push({ mesh, on: false, t: 0, dur: 0.8, r0: 1, r1: 20 });
+  }
+  return {
+    rings,
+    burst(x, y, z, r1, dur, col, r0 = 1.4) {
+      let slot = rings.find((r) => !r.on);
+      if (!slot) slot = rings.reduce((a, b) => (a.t > b.t ? a : b));
+      slot.on = true; slot.t = 0; slot.dur = dur; slot.r0 = r0; slot.r1 = r1;
+      slot.mesh.visible = true;
+      slot.mesh.position.set(x, y, z);
+      slot.mesh.scale.set(r0, 1, r0);
+      slot.mesh.material.uniforms.uCol.value.setRGB(col[0], col[1], col[2]);
+      slot.mesh.material.uniforms.uFade.value = 1;
+    },
+    update(dt) {
+      for (const r of rings) {
+        if (!r.on) continue;
+        r.t += dt;
+        const u = r.t / r.dur;
+        if (u >= 1) { r.on = false; r.mesh.visible = false; continue; }
+        const rad = r.r0 + (r.r1 - r.r0) * Math.pow(u, 0.7);
+        r.mesh.scale.set(rad, 1, rad);
+        r.mesh.material.uniforms.uFade.value = Math.sin(Math.PI * Math.min(u, 1)) * (1.15 - 0.4 * u);
+      }
+    },
+    live() { return rings.reduce((n, r) => n + (r.on ? 1 : 0), 0); },
+  };
+}
+
+

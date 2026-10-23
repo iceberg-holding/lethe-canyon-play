@@ -169,12 +169,12 @@ export class Audio {
   }
   set(param, v, k = 0.08) { param.setTargetAtTime(v, this.ctx.currentTime, k); }
   // continuous layers; prox = 0..1 closeness to walls/arches (doppler-ish swell), alt = ship height
-  update(speed, boost, underwater, skim, running, prox = 0, alt = 10) {
+  update(speed, boost, underwater, skim, running, prox = 0, alt = 10, dampK = 0) {
     if (!this.ctx) return;
     const sp = Math.min(speed / 95, 1.2);
     const on = running ? 1 : 0;
     const swell = prox * prox;
-    this.updateEngine(sp, boost, underwater, running ? 1 : 0, swell);
+    this.updateEngine(sp, boost, underwater, running ? 1 : 0, swell, dampK);
     this.set(this.wind.g.gain, on * (underwater ? 0 : 0.03 + 0.09 * sp * sp + boost * 0.05 + swell * 0.16), prox > this.lastProx ? 0.05 : 0.25);
     this.set(this.wind.fl.frequency, 500 + sp * 900 + swell * 1400);
     const low = Math.max(0, 1 - Math.max(0, alt) / 9);
@@ -205,12 +205,13 @@ export class Audio {
   engineInfo() { return ENGINES.find((e) => e.id === this.engine); }
   // short audition of the current preset at cruise (start screen)
   preview(sec = 1.6) { if (this.ctx) this.previewUntil = this.ctx.currentTime + sec; }
-  updateEngine(sp, boost, underwater, on, swell) {
+  updateEngine(sp, boost, underwater, on, swell, dampK = 0) {
     const prev = this.ctx.currentTime < this.previewUntil;
     if (prev && !on) { on = 1; sp = 0.75; boost = 0; underwater = false; swell = 0; }
     const uw = underwater ? 0.55 : 1;
     this.set(this.engBus.gain, on * uw * (0.85 + 0.25 * sp + 0.2 * swell), prev ? 0.05 : 0.08);
-    this.set(this.engSoft.frequency, underwater ? 1400 : 7000 + sp * 3000 + swell * 2000);
+    const open = underwater ? 1400 : 7000 + sp * 3000 + swell * 2000;
+    this.set(this.engSoft.frequency, open * (1 - 0.72 * Math.max(0, Math.min(1, dampK))));
     const sel = (id) => (this.engine === id ? 1 : 0);
     const W = this.eng.whisper, T = this.eng.turbine, I = this.eng.ion;
     // whisper
@@ -455,6 +456,29 @@ export class Audio {
   torpedoLock() { if (this.ctx) { this.tone('sine', 1180, 1180, 0.06, 0.09, 0, { ui: true }); this.tone('sine', 1570, 1570, 0.06, 0.12, 0.1, { ui: true }); } }
   // close-range punish telegraph: rising siren on the boat
   punishAlarm(pan = 0) { if (this.ctx) { this.tone('sawtooth', 380, 1250, 0.06, 0.55, 0, { pan, attack: 0.02 }); this.tone('square', 760, 2500, 0.025, 0.55, 0, { pan, attack: 0.02 }); } }
+  // round 15: boat scan. A rising chirp as the beam catches, a dull lock tone, then a soft tick while it holds.
+  scanCatch(pan = 0) {
+    if (!this.ctx) return;
+    this.tone('sine', 520, 860, 0.045, 0.2, 0, { pan, attack: 0.012, verb: 0.22 });
+    this.tone('triangle', 1040, 1480, 0.022, 0.16, 0.05, { pan, attack: 0.01 });
+  }
+  scanLock(pan = 0) {
+    if (!this.ctx) return;
+    this.tone('sawtooth', 180, 90, 0.05, 0.38, 0, { pan, attack: 0.02, verb: 0.28 });
+    this.tone('square', 410, 260, 0.028, 0.22, 0.02, { pan, attack: 0.008 });
+    this.noiseHit('bandpass', 880, 1.6, 0.07, 0.32, 220, { pan, attack: 0.02 });
+  }
+  scanTick(pan = 0) {
+    if (!this.ctx) return;
+    this.tone('sine', 760, 700, 0.028, 0.07, 0, { pan, ui: true, attack: 0.004 });
+  }
+  // breach punch under the explosion: a short sub thump and a pressure whoosh. No samples.
+  shockWave(pan = 0) {
+    if (!this.ctx) return;
+    this.tone('sine', 46, 20, 0.5, 0.62, 0, { pan, verb: 0.4, attack: 0.003 });
+    this.tone('triangle', 70, 28, 0.18, 0.4, 0.01, { pan, verb: 0.25 });
+    this.noiseHit('lowpass', 480, 0.7, 0.32, 0.4, 70, { pan, verb: 0.3, attack: 0.002 });
+  }
   // round 14: a hull giving way — low metal groan, flooding hiss, bubble ticks. No samples.
   boatSink(pan = 0) {
     if (!this.ctx) return;
@@ -467,3 +491,5 @@ export class Audio {
     }
   }
 }
+
+

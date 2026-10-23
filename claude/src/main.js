@@ -1,4 +1,4 @@
-import { buildBoatFX, buildBoatUnderFX, WAKE_W } from './boat-fx.js';
+import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js';
 // LETHE / ЛЕТА — "Delivery" prototype. Game loop, flight model, shooting, shield, LETHE spotters
 // and turrets, hazards, camera, HUD, adaptive quality.
 import * as THREE from 'three';
@@ -10,7 +10,7 @@ import {
   MINES, HUNTERS, BOATS, bedY, underLim,
 } from './world.js';
 import {
-  buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP,
+  buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP, BOAT_FEATURES,
 } from './naval.js';
 import {
   buildChunks, buildWater, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS, FALLS,
@@ -259,9 +259,12 @@ scene.add(boatUFX.under, boatUFX.wash);
 const HULL_UW = new THREE.Color(0.2, 0.2, 0.21), HULL_AIR = new THREE.Color(1, 1, 1);   // hull albedo: dark silhouette from below
 const SINK_COL = new THREE.Color();
 scene.add(boatM.pF, boatM.pB, boatM.sF, boatM.sB, boatM.panels);
+const shock = buildShockRings(6);
+for (const r of shock.rings) scene.add(r.mesh);
+const SHOCK = { kick: 0, t: -1, spawned: 0 };
 for (const m of MINES) { m.wp = new THREE.Vector3(0, -1e4, 0); m.anchor = new THREE.Vector3(); }
 for (const h of HUNTERS) { h.wp = new THREE.Vector3(0, -1e4, 0); h.nose = new THREE.Vector3(); h.fwd = new THREE.Vector3(0, 0, -1); }
-for (const b of BOATS) { b.wp = new THREE.Vector3(0, -1e4, 0); b.deck = new THREE.Vector3(0, -1e4, 0); b.gun = new THREE.Vector3(); b.M = new THREE.Matrix4(); }
+for (const b of BOATS) { b.wp = new THREE.Vector3(0, -1e4, 0); b.deck = new THREE.Vector3(0, -1e4, 0); b.gun = new THREE.Vector3(); b.mast = new THREE.Vector3(); b.M = new THREE.Matrix4(); b.scan = 'off'; }
 // round 11: the first two boats of the run (by position along the river) are gentler: slower, longer gun cooldown
 for (const [k, b] of BOATS.slice(0, N_BOAT_REAL).sort((a, c) => a.home - c.home).entries()) b.easy = k < 2;
 const EASY_PACE = 0.65, TUTOR_PACE = 0.6, EASY_CD = 1.6;
@@ -349,6 +352,7 @@ const hud = {
   air: $('tAir'), airBox: $('airBox'), msg: $('msg'), pop: $('pop'), toast: $('toast'), markBox: $('markBox'), markLbl: document.querySelector('#markBox .lbl span'), mark: $('tMark'), sDown: $('sDown'),
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
   dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'), tut: $('tut'),
+  pR: $('pR'), dampCue: $('dampCue'),
 };
 for (let i = 0; i < ROCKET_AMMO; i++) hud.pips.appendChild(document.createElement('i'));
 const zoneEls = ZONES.map((z) => {
@@ -385,6 +389,7 @@ function freshState() {
     relayKills: 0, relayHinted: false, blindSaid: false, noRelay: false, blockLogged: false, lockLog: [], beamSegs: 0, beamTurret: -1, markPings: 0,
     waterBurned: 0, waterSpilled: 0, burnRate: 0, thinAir: false, steam: 0, burnHinted: false, thinHinted: false,
     dmgTaken: 0, uwCam: 0,
+    scan: 0, scanWant: 0, scanCap: 62, scanPhase: 'off', scanBoat: -1, scanDrawn: 0,
   };
 }
 G = freshState();
@@ -655,11 +660,22 @@ function updateFlight(dt) {
   } else if (G.phase === 'flight') {
     // round 14: once the hull is under, hydro drag pulls cruise to UW_FWD and caps lateral speed.
     // Above the water the old targets stay: 34 while diving in, 62 + boost in air.
+    // round 15: a boat scan lock damps only that air cruise. Dive entry and submerged handling are untouched.
     const submerged = G.underwater;
+    const scanK = (!submerged && !G.dive) ? G.scan : 0;
     const target = submerged ? UW_FWD : (G.dive ? 34 : 62 + 32 * G.boost);
-    G.speed += (target - G.speed) * damp(submerged ? UW_DRAG : (boosting ? 1.3 : 0.9), dt);
-    const latMax = submerged ? UW_LAT : (G.dive ? 15 : 30);
-    G.vLat += (ix * latMax - G.vLat) * damp(submerged ? UW_LAT_K : 5, dt);
+    let spdK = submerged ? UW_DRAG : (boosting ? 1.3 : 0.9);
+    let latMax = submerged ? UW_LAT : (G.dive ? 15 : 30);
+    let latK = submerged ? UW_LAT_K : 5;
+    let aimSpd = target;
+    if (scanK > 0) {
+      aimSpd = target + (G.scanCap - target) * scanK;
+      spdK += (2.7 - spdK) * scanK;
+      latMax += (16 - latMax) * scanK;
+      latK += (2.4 - latK) * scanK;
+    }
+    G.speed += (aimSpd - G.speed) * damp(spdK, dt);
+    G.vLat += (ix * latMax - G.vLat) * damp(latK, dt);
     let vYt;
     if (G.dive) vYt = G.y > -2 ? -20 : iy * 7;
     else vYt = G.y < 0.9 ? 16 : iy * 20;
@@ -1595,6 +1611,7 @@ function initNaval() {
   for (const b of BOATS) {
     b.pun = 'idle'; b.punCd = 0;
     b.heard = false; b.hp = BOAT_HP; b.head = b.dir > 0 ? 0 : Math.PI; b.sinkT = 0; b.cd = (2 + Math.random() * 2) * boatCdMul(b); b.fire = 'idle'; b.ft = 0; b.shots = 0; b.flashT = 0;
+    b.scan = 'off'; b.scanT = 0; b.scanGrace = 0; b.scanBeep = 0;
     toWorld(b.s, b.lat, BOAT_KEEL - 0.05, b.wp); toWorld(b.s, b.lat, 2.4, b.deck);
     boatM.panels.setColorAt(BOATS.indexOf(b), BOAT_PANEL[b.type]);
   }
@@ -1742,9 +1759,10 @@ function killBoat(bt, blasted = false) {
       Math.cos(a) * v * 0.3, 2.2 + Math.random() * 5, Math.sin(a) * v * 0.3,
       0.9 + Math.random(), 0.4, 1.6, 0.8, 0.98, 1, 0.85, -7, 1.7);
   }
-  lightFlash(p, blasted ? 200 : 480, 0.5, 1, 0.46, 0.14);
-  if (!blasted) G.flash = { p: p.clone(), t: 0.34, big: 1.1, cold: false };
-  splash(bt.deck, blasted ? 46 : 84, blasted ? 0.65 : 1.05);
+  lightFlash(p, blasted ? 980 : 1280, 0.55, 1, 0.72, 0.28);
+  G.flash = { p: p.clone(), t: 0.5, big: blasted ? 1.65 : 2.05, cold: false };
+  boatShock(p, bt, blasted ? 0.85 : 1);
+  splash(bt.deck, blasted ? 70 : 110, blasted ? 0.9 : 1.25);
   for (let i = 0; i < 7; i++) {
     mist.emit(bt.deck.x + (Math.random() - 0.5) * 4, 0.7, bt.deck.z + (Math.random() - 0.5) * 4,
       (Math.random() - 0.5) * 1.6, 2.5 + Math.random() * 3, (Math.random() - 0.5) * 1.6,
@@ -1752,11 +1770,13 @@ function killBoat(bt, blasted = false) {
   }
   const near = clamp(1 - camera.position.distanceTo(p) / 160, 0, 1);
   if (!blasted) {
-    G.shake = Math.min(1.4, G.shake + 0.3 + 0.45 * near);
-    audio.explosion(0.8, near, panOf(p));
+    G.shake = Math.min(1.5, G.shake + 0.45 + 0.55 * near);
+    audio.explosion(0.95, near, panOf(p));
     audio.splash();
   }
+  audio.shockWave(panOf(p));
   audio.boatSink(panOf(p));
+  bt.scan = 'off';
   navalKill(BOAT_PTS[bt.type], bt.type === 'patrol' ? 'PATROL BOAT / КАТЕР' : 'SMUGGLER / КОНТРАБАНДИСТ');
 }
 const armorEls = [];
@@ -1852,6 +1872,157 @@ function updatePunish(b, dt, time) {
   audio.turretShot(panOf(b.gun) * 0.8);
   b.punFt = PUN_DT;
   if (++b.punShots >= PUN_N) { b.pun = 'idle'; b.punCd = PUN_CD; }
+}
+
+// Round 15: a boat scans the lane from well before you are on top of it. The beam is the telegraph.
+// Catch sticks the beam on the ship with no damp yet; lock (a beat later) pulls air cruise down.
+// Dive, leaving the lane, or killing the boat drops it. Underwater handling is never damped by this.
+const SCAN_R = 245, SCAN_LAT = 50, SCAN_ACQ = 0.5, SCAN_ACQ_EASY = 0.85;
+const SCAN_CAP = 27, SCAN_CAP_EASY = 38, SCAN_CAP_TUT = 46;
+const SCAN_COL = [2.35, 1.72, 0.52];
+function boatShock(p, bt, scale = 1) {
+  const dx = bt.deck.x, dz = bt.deck.z;
+  shock.burst(dx, 0.85, dz, 38 * scale, 0.95, [1.05, 0.82, 0.4], 2.2);
+  shock.burst(dx, 0.9, dz, 16 * scale, 0.42, [1.2, 0.95, 0.75], 0.6);
+  shock.burst(p.x, Math.min(-0.4, p.y), p.z, 22 * scale, 0.7, [1.0, 0.45, 0.14], 1.2);
+  SHOCK.spawned += 3;
+  const d = shipPos.distanceTo(p);
+  let kick = 0;
+  if ((G.underwater || G.y < -0.35) && d < 30) {
+    const k = 1 - d / 30;
+    kick = k * k * scale;
+    G.shake = Math.min(1.5, G.shake + 0.2 + 0.55 * kick);
+    G.micro = Math.min(0.4, G.micro + 0.1 * kick);
+    const ds = G.s - bt.s, dl = G.lat - bt.lat;
+    const len = Math.hypot(ds, dl) || 1;
+    G.vLat += (dl / len) * 6.5 * kick;
+    G.vY += 2.6 * kick;
+    G.speed *= 1 - 0.1 * kick;
+  } else if (d < 46) {
+    G.shake = Math.min(1.35, G.shake + 0.18 * scale * (1 - d / 46));
+  }
+  SHOCK.kick = kick;
+  SHOCK.t = G.t;
+}
+function drawScanBeam(b, time, locked) {
+  const flick = locked ? 0.82 + 0.18 * Math.sin(time * 28) : 0.28 + 0.72 * Math.abs(Math.sin(time * 26));
+  const aim = V1.copy(shipPos); aim.y += 0.7;
+  beams.add(b.mast.x, b.mast.y, b.mast.z, aim.x, aim.y, aim.z, locked ? 1.45 : 0.62, SCAN_COL[0], SCAN_COL[1], SCAN_COL[2], flick, 1);
+  glows.add(b.mast.x, b.mast.y, b.mast.z, SCAN_COL[0], SCAN_COL[1], SCAN_COL[2], 0.85, locked ? 5.5 : 3.2);
+  glows.add(aim.x, aim.y, aim.z, SCAN_COL[0], SCAN_COL[1] * 0.85, SCAN_COL[2], locked ? 0.75 : 0.4, locked ? 4.6 : 2.4);
+  G.scanDrawn++;
+  if (!locked) return;
+  const r = 3.4, a0 = time * 2.2;
+  for (let k = 0; k < 3; k++) {
+    const a = a0 + k * 2.094;
+    const x = aim.x + Math.cos(a) * r, z = aim.z + Math.sin(a) * r;
+    beams.add(x, aim.y - 1.3, z, x, aim.y + 2.1, z, 0.28, SCAN_COL[0], SCAN_COL[1], SCAN_COL[2], 0.55, 1);
+    G.scanDrawn++;
+  }
+}
+function drawScanSweep(b, time, i) {
+  const ds = G.s - b.s;
+  const reach = clamp(Math.abs(ds), 34, 110);
+  const aimS = b.s + Math.sign(ds || -1) * reach;
+  const lat = b.lat + Math.sin(time * 0.92 + i * 1.4) * 32;
+  const y = 7.5 + 3.2 * Math.sin(time * 0.92 + i);
+  toWorld(aimS, lat, y, V1);
+  const flick = 0.45 + 0.4 * Math.abs(Math.sin(time * 9 + i));
+  beams.add(b.mast.x, b.mast.y, b.mast.z, V1.x, V1.y, V1.z, 0.85, SCAN_COL[0], SCAN_COL[1], SCAN_COL[2], flick, 1);
+  glows.add(b.mast.x, b.mast.y, b.mast.z, SCAN_COL[0], SCAN_COL[1], SCAN_COL[2], 0.55, 2.8);
+  glows.add(V1.x, V1.y, V1.z, SCAN_COL[0], SCAN_COL[1] * 0.7, 0.3, 0.28 * flick, 2.2);
+  G.scanDrawn++;
+}
+function measureScan(b) {
+  const pt = b.type === 'patrol';
+  b.mast.set(0, pt ? 5.45 : 3.55, pt ? 1.0 : 3.5).applyMatrix4(b.M);
+  const ds = b.s - G.s, dl = b.lat - G.lat;
+  const dist = Math.hypot(ds, dl, (b.deck.y || 2) - G.y);
+  // Lane check, not a straight chord: a bend must not hide the scan. Rocks and arches still break it.
+  let los = dist < 460;
+  if (los) {
+    const steps = 5;
+    for (let k = 1; k < steps && los; k++) {
+      const s = G.s + (b.s - G.s) * (k / steps);
+      const lat = G.lat + (b.lat - G.lat) * (k / steps);
+      const y = G.y + (b.mast.y - G.y) * (k / steps);
+      for (const ar of ARCHES) if (Math.abs(ar.s - s) < ar.ht && y > archBottom(ar, lat) && y < archTop(ar, lat)) los = false;
+      for (const r of ROCKS) if (Math.abs(r.s - s) < r.r * 0.9 && y < r.h && Math.abs(r.lat - lat) < r.r * 0.75) los = false;
+    }
+  }
+  const elig = b.alive && G.phase === 'flight' && !G.dive && !G.underwater && G.y > 0.45
+    && ds > -28 && ds < SCAN_R && Math.abs(dl) < SCAN_LAT && los;
+  const show = b.alive && ds > -40 && ds < 380 && Math.abs(dl) < 90 && dist < 420;
+  return { ds, dl, dist, los, elig, show };
+}
+function resolveBoatScan(dt, time) {
+  G.scanDrawn = 0;
+  if (G.dive || G.underwater || G.y < 0.35 || G.phase !== 'flight') {
+    for (const b of BOATS) if (b.scan !== 'off') b.scan = 'off';
+    G.scanPhase = 'off'; G.scanWant = 0; G.scanBoat = -1;
+    G.scan += (0 - G.scan) * damp(8, dt);
+    if (G.scan < 0.01) G.scan = 0;
+    return;
+  }
+  let holder = null;
+  for (const b of BOATS) if (b.alive && (b.scan === 'catch' || b.scan === 'lock') && b.scanInfo && b.scanInfo.elig) holder = b;
+  let cand = holder, candD = holder ? holder.scanInfo.dist : 1e9;
+  if (!cand) {
+    for (const b of BOATS) if (b.alive && b.scanInfo && b.scanInfo.elig && b.scanInfo.dist < candD) { cand = b; candD = b.scanInfo.dist; }
+  }
+  let phase = 'off', cap = G.scanCap, boatI = -1;
+  for (let i = 0; i < BOATS.length; i++) {
+    const b = BOATS[i];
+    const info = b.scanInfo;
+    if (!b.alive || !info) { b.scan = 'off'; continue; }
+    const mine = b === cand;
+    if (!mine && (b.scan === 'catch' || b.scan === 'lock') && b.scanGrace > 0) {
+      b.scanGrace -= dt;
+      drawScanBeam(b, time, b.scan === 'lock');
+      if (b.scan === 'lock') { phase = 'lock'; boatI = i; cap = b.scanCap || SCAN_CAP; }
+      else if (phase !== 'lock') { phase = 'catch'; boatI = i; }
+      continue;
+    }
+    if (!mine) {
+      b.scan = 'off';
+      if (info.show) drawScanSweep(b, time, i);
+      continue;
+    }
+    b.scanGrace = 0.22;
+    const acq = (b.easy || b === TUT.boat) ? SCAN_ACQ_EASY : SCAN_ACQ;
+    if (b.scan !== 'catch' && b.scan !== 'lock') {
+      b.scan = 'catch'; b.scanT = acq; b.scanBeep = 0;
+      audio.scanCatch(panOf(b.mast));
+      if (TUT.phase !== 'active') showMsg('BOAT SCAN — DIVE', 'КАТЕР СКАНИРУЕТ — НЫРЯЙ', 1.15, '#ffd39a');
+    }
+    if (b.scan === 'catch') {
+      b.scanT -= dt;
+      if (b.scanT <= 0) {
+        b.scan = 'lock'; b.scanBeep = 0.15;
+        const tutSoft = b === TUT.boat && TUT.phase === 'active' && !TUT.dived;
+        b.scanCap = tutSoft ? SCAN_CAP_TUT : (b.easy || b === TUT.boat) ? SCAN_CAP_EASY : SCAN_CAP;
+        audio.scanLock(panOf(b.mast));
+        if (TUT.phase !== 'active') showMsg('ENGINES DAMPED — DIVE', 'ДВИГАТЕЛИ ГЛУШАТ — НЫРЯЙ', 1.35, '#ffb15e');
+      }
+    }
+    if (b.scan === 'lock') {
+      const tutSoft = b === TUT.boat && TUT.phase === 'active' && !TUT.dived;
+      b.scanCap = tutSoft ? SCAN_CAP_TUT : (b.easy || b === TUT.boat) ? SCAN_CAP_EASY : SCAN_CAP;
+      drawScanBeam(b, time, true);
+      b.scanBeep -= dt;
+      if (b.scanBeep <= 0) { b.scanBeep = 0.55; audio.scanTick(panOf(shipPos)); }
+      phase = 'lock'; boatI = i; cap = b.scanCap || SCAN_CAP;
+    } else {
+      drawScanBeam(b, time, false);
+      if (phase !== 'lock') { phase = 'catch'; boatI = i; }
+    }
+  }
+  G.scanPhase = phase;
+  G.scanBoat = boatI;
+  G.scanWant = phase === 'lock' ? 1 : 0;
+  if (phase === 'lock') G.scanCap = cap;
+  G.scan += (G.scanWant - G.scan) * damp(G.scanWant ? 5.5 : 7, dt);
+  if (G.scan < 0.012 && !G.scanWant) G.scan = 0;
 }
 
 // round 14: bow and stern stay a boat. They list, the stern goes down, the break opens, and both halves
@@ -2070,6 +2241,7 @@ function updateNaval(dt, time) {
     const gone = !b.alive && b.sinkT > 7;
     if (gone || b.s < G.s - 250 || b.s > G.s + 1300) {
       mF.setMatrixAt(i, ZERO_M); mB.setMatrixAt(i, ZERO_M); boatM.panels.setMatrixAt(i, ZERO_M);
+      b.scanInfo = null; b.scan = 'off';
       if (!b.alive) { b.wp.set(0, -1e4, 0); b.deck.set(0, -1e4, 0); }
       continue;
     }
@@ -2090,6 +2262,7 @@ function updateNaval(dt, time) {
       mF.setMatrixAt(i, b.M); mB.setMatrixAt(i, b.M);
       boatM.panels.setMatrixAt(i, b.M);
     } else {
+      b.scanInfo = null; b.scan = 'off';
       drawSinkingBoat(b, i, dt, time, mF, mB);
       continue;
     }
@@ -2165,6 +2338,7 @@ function updateNaval(dt, time) {
       P.set((Math.random() - 0.5) * 4, 0.2, -6.5).applyMatrix4(b.M);
       mist.emit(P.x, 0.3, P.z, (Math.random() - 0.5) * 3, 1.5 + Math.random() * 2, (Math.random() - 0.5) * 3, 0.9, 0.8, 2.6, 0.88, 0.95, 0.95, 0.55, 8, 0.6);
     }
+    b.scanInfo = measureScan(b);
     if (flying) shipHitsBoat(b);
     updatePunish(b, dt, time);
     // Council patrol boats fire on a surfaced ship in range: telegraph (white/blue strobe on the gun) -> 3 dodgeable bolts
@@ -2194,6 +2368,8 @@ function updateNaval(dt, time) {
       }
     }
   }
+  resolveBoatScan(dt, time);
+  shock.update(dt);
   for (const k of ['pF', 'pB', 'sF', 'sB', 'panels']) boatM[k].instanceMatrix.needsUpdate = true;
   boatFX.wake.material.uniforms.uTime.value = time;
   for (const mesh of Object.values(boatFX)) { mesh.instanceMatrix.needsUpdate=true; mesh.visible=quality!=='low'||mesh===boatFX.wake||mesh===boatFX.bow; }
@@ -2666,6 +2842,7 @@ function updateCamera(dt, time) {
     shafts.visible = !cu && quality !== 'low';
     const fd = cu ? FOG_D_WATER : FOG_D_AIR;
     for (const m of [glows.mat, sparks.out.mat, mist.out.mat, beams.mat, foam.material, wake.mat]) m.uniforms.uFogD.value = fd;
+    for (const r of shock.rings) r.mesh.material.uniforms.uFogD.value = fd;
     mist.out.mat.uniforms.uFogCol.value.copy(scene.fog.color);
     for (const z of ZONES) if (z.mesh) z.mesh.material.uniforms.uFogD.value = fd;
     hemi.intensity = cu ? 1.3 : 1.85;
@@ -2924,6 +3101,15 @@ function updateHUD(dt, time) {
   hud.tintHit.style.opacity = G.hitFlash;
   hud.tintShield.style.opacity = Math.max(G.shieldFlash, G.shieldHit * 0.5);
   hud.dive.classList.toggle('under', G.dive);
+  const scanShow = G.scanPhase === 'catch' || G.scanPhase === 'lock';
+  hud.pR.classList.toggle('damp', G.scanPhase === 'lock' || G.scan > 0.2);
+  if (scanShow !== hud.dampCue.classList.contains('on')) hud.dampCue.classList.toggle('on', scanShow);
+  if (scanShow && hud.dampPhase !== G.scanPhase) {
+    hud.dampPhase = G.scanPhase;
+    hud.dampCue.innerHTML = G.scanPhase === 'lock'
+      ? 'ENGINES DAMPED — DIVE<i>ДВИГАТЕЛИ ГЛУШАТ — НЫРЯЙ</i>'
+      : 'BOAT SCAN — DIVE<i>КАТЕР СКАНИРУЕТ — НЫРЯЙ</i>';
+  }
   const pips = hud.pips.children;
   for (let i = 0; i < pips.length; i++) pips[i].classList.toggle('off', i >= G.rockets);
   hud.pips.classList.toggle('cd', G.rocketCd > 0);
@@ -3199,7 +3385,8 @@ function updateTorpCue(rdt) {
 // round 12: the autopilot dives under a boat close ahead (as the tutorial teaches) through its existing dive timer
 function apBoatDive() {
   if (G.air < 14) return;
-  for (const b of BOATS) if (b.alive && b.s - G.s > -25 && b.s - G.s < 170 && Math.abs(b.lat - G.lat) < 45) { G.apDiveT = Math.max(G.apDiveT, 1.4); return; }
+  if (G.scanPhase === 'catch' || G.scanPhase === 'lock') { G.apDiveT = Math.max(G.apDiveT, 2.4); return; }
+  for (const b of BOATS) if (b.alive && b.s - G.s > -25 && b.s - G.s < 240 && Math.abs(b.lat - G.lat) < 55) { G.apDiveT = Math.max(G.apDiveT, 1.8); return; }
   for (const b of BOATS) if (b.pun === 'tele') { G.apDiveT = Math.max(G.apDiveT, 1.4); return; }
 }
 function startTutorial(b, d) {
@@ -3330,7 +3517,7 @@ function loop() {
 
   updateHUD(dt, time);
   updateAudioScene();
-  audio.update(G.speed * (1 - G.dip), G.boost, camUnder, G.skim || 0, G.phase !== 'start' && G.phase !== 'result', G.prox || 0, G.y);
+  audio.update(G.speed * (1 - G.dip), G.boost, camUnder, G.skim || 0, G.phase !== 'start' && G.phase !== 'result', G.prox || 0, G.y, (G.dive || G.underwater) ? 0 : G.scan);
   audio.steam(G.phase === 'flight' && !camUnder ? G.steam : 0);
   renderer.info.reset();
   post.render(time);
@@ -3385,6 +3572,11 @@ window.__lethe = {
     fog: { density: scene.fog.density, color: scene.fog.color.toArray().map((x) => +x.toFixed(4)) },
     // round 14: submerged cruise targets (air handling still uses 62 + 32*boost / lat 30 when hydro.under is false)
     hydro: { under: G.underwater, fwd: UW_FWD, lat: UW_LAT, vLat: +G.vLat.toFixed(2), wreck: +wreckL.intensity.toFixed(1) },
+    // round 15: scan damp is 0 unless a live boat's beam has locked; air cruise is unchanged at k = 0
+    scan: { k: +G.scan.toFixed(3), want: G.scanWant, cap: G.scanCap, phase: G.scanPhase, boat: G.scanBoat, drawn: G.scanDrawn,
+      dampCue: hud.dampCue.classList.contains('on'), speedDamp: hud.pR.classList.contains('damp') },
+    shock: { kick: +SHOCK.kick.toFixed(3), spawned: SHOCK.spawned, live: shock.live(), t: +SHOCK.t.toFixed(2) },
+    boatFeatures: BOAT_FEATURES,
   }),
   start: startGame,
   retry: () => { reset(); startGame(); },
@@ -3424,7 +3616,7 @@ window.__lethe = {
     spawnBoat: (ahead = 80, lat = null, type = 'patrol', speed = 0) => {
       const b = BOATS.find((x) => x.debug && !x.alive) || BOATS[BOATS.length - 1];
       const l = lat === null ? G.lat : lat;
-      Object.assign(b, { s: G.s + ahead, home: G.s + ahead, lat: l, lat0: l, type, dir: 1, dir0: 1, speed, alive: true, hp: BOAT_HP, head: 0, sinkT: 0, cd: 1, fire: 'idle', easy: false, pun: 'idle', punCd: 0 });
+      Object.assign(b, { s: G.s + ahead, home: G.s + ahead, lat: l, lat0: l, type, dir: 1, dir0: 1, speed, alive: true, hp: BOAT_HP, head: 0, sinkT: 0, cd: 1, fire: 'idle', easy: false, pun: 'idle', punCd: 0, scan: 'off', scanT: 0, scanGrace: 0 });
       toWorld(b.s, b.lat, BOAT_KEEL - 0.05, b.wp); toWorld(b.s, b.lat, 2.4, b.deck);
       boatM.panels.setColorAt(BOATS.indexOf(b), BOAT_PANEL[type]); boatM.panels.instanceColor.needsUpdate = true;
       return BOATS.indexOf(b);
@@ -3475,7 +3667,8 @@ window.__lethe = {
       const yOf = (mesh) => { mesh.getMatrixAt(i, M1); const e = M1.elements; return { y: +e[13].toFixed(2), sx: +Math.hypot(e[0], e[1], e[2]).toFixed(2) }; };
       const pt = b.type === 'patrol';
       const bow = yOf(pt ? boatM.pF : boatM.sF), stern = yOf(pt ? boatM.pB : boatM.sB);
-      return { alive: b.alive, sinkT: +(b.sinkT || 0).toFixed(2), bowY: bow.y, sternY: stern.y, bowOn: bow.sx > 0.2, sternOn: stern.sx > 0.2, wreck: +wreckL.intensity.toFixed(1), list: b.list || 0 };
+      return { alive: b.alive, sinkT: +(b.sinkT || 0).toFixed(2), bowY: bow.y, sternY: stern.y, bowOn: bow.sx > 0.2, sternOn: stern.sx > 0.2, wreck: +wreckL.intensity.toFixed(1), list: b.list || 0,
+        verts: { patrolBow: boatM.pF.geometry.attributes.position.count, patrolStern: boatM.pB.geometry.attributes.position.count, smugglerBow: boatM.sF.geometry.attributes.position.count, smugglerStern: boatM.sB.geometry.attributes.position.count } };
     },
     threat: (kind = 'turret', i = 0) => { const o = kind === 'turret' ? TURRETS[i] : DRONES[i]; threat(o, o.wp); return o.s; },
     damageShield: (n = 30) => damage(n, V4.copy(shipPos).addScaledVector(shipFwd, 6).clone(), 'debug'),
