@@ -377,7 +377,7 @@ function freshState() {
     rockets: ROCKET_AMMO, rocketCd: 0, rocketsFired: 0, recoilT: 9, dip: 0, kick: 0, jolt: 0, micro: 0,
     mineKills: 0, mineHits: 0, hunterKills: 0, hunterRams: 0, hunterShots: 0, boatKills: 0, navalHits: 0, boatShots: 0, ricochets: 0, armorT: 0,
     mineHinted: false, hunterHinted: false, boatHinted: false,
-    relayKills: 0, relayHinted: false, blindSaid: false, noRelay: false, blockLogged: false, lockLog: [], beamSegs: 0, beamTurret: -1,
+    relayKills: 0, relayHinted: false, blindSaid: false, noRelay: false, blockLogged: false, lockLog: [], beamSegs: 0, beamTurret: -1, markPings: 0,
     waterBurned: 0, waterSpilled: 0, burnRate: 0, thinAir: false, steam: 0, burnHinted: false, thinHinted: false,
     dmgTaken: 0, uwCam: 0,
   };
@@ -1412,6 +1412,7 @@ function updateLethe(dt, time) {
     glows.add(m.x, m.y, m.z, 2, 0.2, 0.1, 1, 6);
     glows.add(V3.x, V3.y, V3.z, 2, 0.3, 0.15, 0.6 + 0.4 * jit, 3);
   }
+  markPings(dt, time);
   // --- enemy bolts
   for (const b of ebolts) {
     if (!b.on) continue;
@@ -1459,14 +1460,15 @@ function dataSeg(a, b, time, k, alpha) {
   const len = a.distanceTo(b);
   if (len < 1) return;
   const n = Math.min(DB_SEG[quality] || 11, Math.ceil(len / 9)), dl = Math.min(2.6, (len / n) * 0.4);
-  // faint carrier line, then dashed packets travelling a -> b
-  beams.add(a.x, a.y, a.z, b.x, b.y, b.z, 0.12, 1.7, 0.36, 0.1, alpha * (0.4 + 0.12 * Math.sin(time * 9 + k)));
+  // faint red-amber carrier, dimmer than the cyan ship-tag so the two jobs stay apart
+  beams.add(a.x, a.y, a.z, b.x, b.y, b.z, 0.08, 1.25, 0.22, 0.06, alpha * (0.2 + 0.07 * Math.sin(time * 9 + k)));
   const ph = (time * 1.6 + k * 0.37) % 1;
   for (let j = 0; j < n; j++) {
     const u = (j + ph) / n, u0 = Math.max(0, u - dl / len);
     const fl = alpha * (0.55 + 0.45 * Math.sin(time * 14 + j * 2.1 + k));
+    // packets stay amber and a little softer — they run to the relay, not onto the ship
     beams.add(a.x + (b.x - a.x) * u0, a.y + (b.y - a.y) * u0, a.z + (b.z - a.z) * u0,
-      a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u, a.z + (b.z - a.z) * u, 0.3, 2.6, 0.7, 0.16, fl);
+      a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u, a.z + (b.z - a.z) * u, 0.24, 2.2, 0.46, 0.1, fl * 0.82);
   }
   G.beamSegs++;
 }
@@ -1489,6 +1491,84 @@ function dataBeams(time, cand) {
   // the relay's top light flares while it is passing the mark
   glows.add(relay.top.x, relay.top.y, relay.top.z, 2.4, 0.5, 0.15, 0.6 + 0.4 * Math.sin(time * 18), 7);
   G.beamTurret = TURRETS.indexOf(t);
+}
+// MARK PING: while a drone is spotting, brief cold-cyan dashes travel drone → ship.
+// A pair (tyn-tyn), then a gap. Slightly faster and brighter as the mark fills.
+// Not a solid beam — the red turret designation laser stays that job. No pings underwater
+// (drones do not spot there; cam-under also skips so the murk stays clear).
+const PING_ON = 0.12;
+function markPings(dt, time) {
+  G.markPings = 0;
+  G.markPingU = 0;
+  // G.underwater is latched in updateHazards, which runs after this, so also test altitude.
+  // A dive must kill the tag on the same frame the hull goes under. Camera-under skips too.
+  const under = G.underwater || G.y < -0.6 || camUnder;
+  if (G.phase !== 'flight' || under || G.spotters <= 0) {
+    for (const d of DRONES) d.ping = null;
+    return;
+  }
+  let nearest = null, nd = 1e9;
+  for (const d of DRONES) if (d.spotting) {
+    const x = d.wp.distanceTo(shipPos);
+    if (x < nd) { nd = x; nearest = d; }
+  }
+  const k = G.mark;
+  const bright = lerp(0.58, 1, k);
+  for (const d of DRONES) {
+    if (!d.spotting) { d.ping = null; continue; }
+    if (!d.ping) d.ping = { phase: 'wait', t: 0.05 + ((d.phase % 1) * 0.26) };
+    const p = d.ping;
+    const was = p.phase;
+    p.t -= dt;
+    if (p.t <= 0) {
+      if (p.phase === 'wait') { p.phase = 'a'; p.t = PING_ON; }
+      else if (p.phase === 'a') { p.phase = 'gap'; p.t = lerp(0.1, 0.048, k); }
+      else if (p.phase === 'gap') { p.phase = 'b'; p.t = PING_ON; }
+      else { p.phase = 'wait'; p.t = lerp(0.64, 0.28, k); }
+    }
+    const flashing = p.phase === 'a' || p.phase === 'b';
+    if (flashing && p.phase !== was && d === nearest) audio.markPing(panOf(d.wp), k, p.phase === 'b');
+    if (flashing) drawMarkPing(d, 1 - p.t / PING_ON, bright * (p.phase === 'b' ? 1.08 : 0.92), time);
+  }
+  // hold a mid-pulse frame (path lit, stroke in the air) when a shot is requested
+  if (freezeOnPing && G.markPingU > 0.45) frozen = true;
+}
+// Dashed cold-cyan tag for this flash only (off in the gap — not a solid laser), plus a
+// brighter stroke travelling drone → ship. coreTint keeps the hot core cyan, not white.
+function drawMarkPing(d, u, alpha, time) {
+  if (u <= 0.05 || u > 1.02) return;
+  const a = d.wp, b = shipPos;
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 3) return;
+  // stop a few metres short of the hull so the tag sits in the air, not inside the mesh
+  const arrive = Math.max(0.5, (len - 3.2) / len);
+  const env = 0.72 + 0.28 * Math.sin(Math.min(u, 1) * Math.PI);
+  const flick = 0.9 + 0.1 * Math.sin(time * 46 + d.phase);
+  const A = alpha * env * flick;
+  // cold cyan: green and blue high, red kept low — not white, not pure blue, not deep navy
+  const cr = 0.2, cg = 1.85, cb = 2.15;
+  const seg = (s0, s1, w, al) => {
+    if (s1 - s0 < 0.015) return;
+    beams.add(a.x + dx * s0, a.y + dy * s0, a.z + dz * s0, a.x + dx * s1, a.y + dy * s1, a.z + dz * s1,
+      w, cr, cg, cb, al, 1);
+  };
+  // broken dashes along the whole path so the tag reads through dust, with gaps so it is not a solid beam
+  const bits = len > 90 ? 4 : 3;
+  for (let i = 0; i < bits; i++) seg((i + 0.06) / bits, Math.min(arrive, (i + 0.58) / bits), 0.34 + 0.08 * alpha, Math.min(1.05, A * 0.82));
+  const u1 = Math.min(Math.max(u, 0.08), arrive);
+  const dash = Math.min(42, Math.max(11, len * 0.36));
+  seg(Math.max(0, u1 - dash / len), u1, 0.48 + 0.12 * alpha, Math.min(1.2, A));
+  glows.add(a.x + dx * u1, a.y + dy * u1, a.z + dz * u1, 0.25, 1.35, 1.6, Math.min(1.1, A), 3.6);
+  if (u < 0.4) glows.add(a.x, a.y - 0.15, a.z, 0.28, 1.3, 1.55, (1 - u / 0.4) * alpha, 4.2);
+  if (u > 0.55) {
+    const kGlow = Math.min(1, (u - 0.55) / 0.3) * alpha;
+    const ix = b.x + (camera.position.x - b.x) * 0.12;
+    const iz = b.z + (camera.position.z - b.z) * 0.12;
+    glows.add(ix, b.y + 1.2, iz, 0.2, 1.55, 1.8, kGlow, 7.4);
+  }
+  if (u > G.markPingU) G.markPingU = u;
+  G.markPings++;
 }
 function explodeSmall(p) {
   for (let i = 0; i < 6; i++) sparks.emit(p.x, p.y, p.z, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, 0.35, 2, 5, 2, 0.7, 0.3, 1, 0, 2);
@@ -2364,7 +2444,7 @@ function updateShipVisual(dt, time) {
 // ------------------------------------------------------------------ camera
 let fovCur = 68;
 const CAM_MARGIN = 5;
-let closeCam = null, cineCam = null, frozen = false;
+let closeCam = null, cineCam = null, frozen = false, freezeOnPing = false;
 const UW_CAM_BLEND = 0.7, UW_CAM_BACK = 7, UW_CAM_UP = 3.6, UW_CAM_LOOK = 1.4;   // round 12 underwater camera offset
 // the extra pull-back never parks the camera behind a rock column in the river (it shrinks to stay in front of it)
 function uwCamBack() {
@@ -3160,7 +3240,7 @@ window.__lethe = {
       : BOATS.includes(aimObj) ? 'boat' : 'relay') : null, turretKills: G.turretKills,
     relaysAlive: BEACONS.filter((b) => b.alive).length, relaysDown: BEACONS.filter((b) => !b.alive).length, relayKills: G.relayKills,
     noRelay: G.noRelay, zone: zoneAt(G.s)?.idx ?? -1, sectorLinked: zoneLinked(zoneAt(G.s)), lockRelay: G.lock.phase !== 'none' ? !!G.lock.relay : null,
-    lockTurret: G.lock.turret ? TURRETS.indexOf(G.lock.turret) : -1, lockLog: G.lockLog.slice(-8), dataBeam: G.beamSegs, beamTurret: G.beamTurret,
+    lockTurret: G.lock.turret ? TURRETS.indexOf(G.lock.turret) : -1, lockLog: G.lockLog.slice(-8), dataBeam: G.beamSegs, beamTurret: G.beamTurret, markPings: G.markPings,
     blindTurrets: TURRETS.filter((t) => t.alive && t.blind).length,
     mines: { alive: MINES.filter((m) => m.alive).length, killed: G.mineKills, hit: G.mineHits },
     hunters: { alive: HUNTERS.filter((h) => h.alive).length, killed: G.hunterKills, rams: G.hunterRams, shots: G.hunterShots, hunting: HUNTERS.filter((h) => h.alive && h.mode === 'hunt').length,
@@ -3297,7 +3377,23 @@ window.__lethe = {
     closeCam: (az = 35, el = 15, dist = 22) => { closeCam = az === null ? null : { az, el, dist }; },
     // round 8: free cinematic camera {s, lat, y, ls, llat, ly, fov} (null = off) and a simulation freeze
     cine: (c) => { cineCam = c || null; },
-    freeze: (on = true) => { frozen = !!on; },
+    freeze: (on = true) => { frozen = !!on; freezeOnPing = false; },
+    freezeOnPing: () => { freezeOnPing = true; },
+    // colours of ribbons drawn last frame: cyan ship-tags vs the red designation laser
+    beamProbe: () => {
+      const n = beams.n;
+      let cyan = 0, laser = 0, laserRGB = null;
+      for (let i = 0; i < n; i++) {
+        const r = beams.C[i * 16], g = beams.C[i * 16 + 1], b = beams.C[i * 16 + 2], a = beams.C[i * 16 + 3];
+        const tint = beams.Q[i * 16 + 3];
+        if (tint > 0.5 && g > 1.3 && b > 1.5 && r < 0.5 && a > 0.15) cyan++;
+        if (r > 2.1 && g < 0.25 && b < 0.15 && a > 0.4 && tint < 0.5) {
+          laser++;
+          if (!laserRGB) laserRGB = [+r.toFixed(3), +g.toFixed(3), +b.toFixed(3)];
+        }
+      }
+      return { n, cyan, laser, laserRGB, markPings: G.markPings, spotters: G.spotters, underwater: G.underwater, camUnder, lock: G.lock.phase, mark: +G.mark.toFixed(3), frozen };
+    },
     shipCam: () => ({ ship: shipPos.toArray(), cam: camera.position.toArray() }),
   },
 };

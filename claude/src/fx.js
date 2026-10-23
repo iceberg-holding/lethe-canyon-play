@@ -165,7 +165,7 @@ export class Streaks {
 const beamVS = /* glsl */`
 attribute vec3 aA; attribute vec3 aB; attribute vec4 aQ; attribute vec4 aCol;
 uniform float uFogD;
-varying vec2 vQ; varying vec4 vCol; varying float vFog;
+varying vec3 vQ; varying vec4 vCol; varying float vFog;
 void main(){
   vec3 P = mix(aA, aB, aQ.y);
   vec3 dir = aB - aA;
@@ -173,19 +173,21 @@ void main(){
   float l = length(sd);
   sd = l > 1e-5 ? sd / l : vec3(0.0, 1.0, 0.0);
   P += sd * aQ.z * aQ.x;
-  vQ = aQ.xy; vCol = aCol;
+  vQ = vec3(aQ.xy, aQ.w); vCol = aCol;
   vec4 mv = viewMatrix * vec4(P, 1.0);
   float d = -mv.z * uFogD; vFog = exp(-d * d);
   gl_Position = projectionMatrix * mv;
 }`;
 const beamFS = /* glsl */`
-varying vec2 vQ; varying vec4 vCol; varying float vFog;
+varying vec3 vQ; varying vec4 vCol; varying float vFog;
 void main(){
   float across = 1.0 - abs(vQ.x);
   float core = pow(across, 7.0) * 1.6;
   float glow = pow(across, 1.8) * 0.75;
   float along = pow(vQ.y, 0.8);
-  vec3 c = (vCol.rgb * glow + vec3(1.0, 0.97, 0.9) * core * along) * vCol.a * along * vFog;
+  // aQ.w > 0.5: core stays the ribbon colour (cold cyan pings). Otherwise the usual warm-white core.
+  vec3 coreCol = mix(vec3(1.0, 0.97, 0.9), vCol.rgb, step(0.5, vQ.z));
+  vec3 c = (vCol.rgb * glow + coreCol * core * along) * vCol.a * along * vFog;
   gl_FragColor = vec4(c, 1.0);
 }`;
 export class Beams {
@@ -217,12 +219,14 @@ export class Beams {
   }
   begin() { this.n = 0; }
   // tail (x0..) -> head (x1..); width in metres; colour (HDR ok)
-  add(x0, y0, z0, x1, y1, z1, w, r, g, b, a) {
+  // coreTint 1 keeps the hot core in the ribbon colour (scanner pings). 0 is the default warm-white core.
+  add(x0, y0, z0, x1, y1, z1, w, r, g, b, a, coreTint = 0) {
     if (this.n >= this.cap) return;
     const i = this.n++;
     for (let k = 0; k < 4; k++) {
       this.A.set([x0, y0, z0], i * 12 + k * 3); this.B.set([x1, y1, z1], i * 12 + k * 3);
       this.Q[i * 16 + k * 4 + 2] = w;
+      this.Q[i * 16 + k * 4 + 3] = coreTint;
       this.C.set([r, g, b, a], i * 16 + k * 4);
     }
   }

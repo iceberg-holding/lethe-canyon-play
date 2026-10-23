@@ -355,6 +355,14 @@ export class Audio {
   }
   shieldUp() { this.tone('sine', 320, 980, 0.05, 0.9, 0, { attack: 0.25, ui: true }); this.tone('sine', 480, 1470, 0.02, 0.9, 0, { attack: 0.3, ui: true }); }
   lockTick(m) { this.tone('square', 700 + m * 900, 700 + m * 900, 0.035, 0.05, 0, { ui: true }); }
+  // spotter scanner: one light cold sine tick per cyan ping, panned to the drone.
+  // The second tap of the pair sits a little higher. Distinct from the square MARK beep on the UI bus.
+  markPing(pan = 0, m = 0, second = false) {
+    if (!this.ctx) return;
+    const f = (second ? 2280 : 1860) + m * 260;
+    const peak = (second ? 0.015 : 0.024) + m * 0.01;
+    this.tone('sine', f, f * 0.93, peak, 0.036, 0, { pan, attack: 0.001, verb: 0.18 });
+  }
   lockOn() { this.tone('square', 1800, 1800, 0.06, 0.5, 0, { ui: true }); this.tone('square', 1805, 1805, 0.04, 0.5, 0, { ui: true }); }
   laser() { this.tone('sawtooth', 220, 180, 0.04, 0.9); }
   turretShot(pan = 0) {
