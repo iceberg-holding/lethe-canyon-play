@@ -455,4 +455,15 @@ export class Audio {
   torpedoLock() { if (this.ctx) { this.tone('sine', 1180, 1180, 0.06, 0.09, 0, { ui: true }); this.tone('sine', 1570, 1570, 0.06, 0.12, 0.1, { ui: true }); } }
   // close-range punish telegraph: rising siren on the boat
   punishAlarm(pan = 0) { if (this.ctx) { this.tone('sawtooth', 380, 1250, 0.06, 0.55, 0, { pan, attack: 0.02 }); this.tone('square', 760, 2500, 0.025, 0.55, 0, { pan, attack: 0.02 }); } }
+  // round 14: a hull giving way — low metal groan, flooding hiss, bubble ticks. No samples.
+  boatSink(pan = 0) {
+    if (!this.ctx) return;
+    this.duck(0.35, 0.35);
+    this.tone('sawtooth', 130, 36, 0.14, 1.35, 0, { pan, verb: 0.45, attack: 0.03 });
+    this.tone('triangle', 78, 26, 0.2, 1.7, 0.05, { pan, verb: 0.3, attack: 0.04 });
+    this.noiseHit('lowpass', 820, 0.7, 0.26, 1.5, 110, { pan, verb: 0.35, attack: 0.06 });
+    for (let i = 0; i < 8; i++) {
+      this.tone('sine', 400 + Math.random() * 360, 680 + Math.random() * 480, 0.035, 0.05 + Math.random() * 0.05, 0.1 + i * 0.12 + Math.random() * 0.04, { pan, attack: 0.004 });
+    }
+  }
 }

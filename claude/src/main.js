@@ -91,6 +91,10 @@ scene.add(sun2L);
 // pooled flash light (muzzle flashes / explosions); always present so programs never recompile
 const flashL = new THREE.PointLight(0xffa050, 0, 110, 2);
 scene.add(flashL);
+// round 14: one pooled light that rides a sinking boat's breach so the hull stays readable in the murk
+const wreckL = new THREE.PointLight(0xff6a22, 0, 22, 2);
+scene.add(wreckL);
+let wreckPick = 1e12;
 
 const sky = makeSky(SUN, SUN2, HOR, ZEN);
 scene.add(sky);
@@ -253,6 +257,7 @@ scene.add(...Object.values(boatFX));
 const boatUFX = buildBoatUnderFX(BOATS.length, FOG_D_WATER);
 scene.add(boatUFX.under, boatUFX.wash);
 const HULL_UW = new THREE.Color(0.2, 0.2, 0.21), HULL_AIR = new THREE.Color(1, 1, 1);   // hull albedo: dark silhouette from below
+const SINK_COL = new THREE.Color();
 scene.add(boatM.pF, boatM.pB, boatM.sF, boatM.sB, boatM.panels);
 for (const m of MINES) { m.wp = new THREE.Vector3(0, -1e4, 0); m.anchor = new THREE.Vector3(); }
 for (const h of HUNTERS) { h.wp = new THREE.Vector3(0, -1e4, 0); h.nose = new THREE.Vector3(); h.fwd = new THREE.Vector3(0, 0, -1); }
@@ -546,8 +551,10 @@ function fail(en, ru) {
   audio.explosion(1.2, 1);
 }
 
-// ------------------------------------------------------------------ flight (round-1 handling, unchanged)
+// ------------------------------------------------------------------ flight (air handling unchanged; round 14 drag applies only once submerged)
 const SHIP_R = 3.2;
+// Submerged cruise is about a third of air cruise (62). The dive plunge, still in air, keeps its 34 m/s target and lat 15.
+const UW_FWD = 20, UW_DRAG = 2.6, UW_LAT = 11, UW_LAT_K = 3;
 function toggleDive() {
   if (G.phase !== 'flight') return;
   if (!G.dive && G.air < 3) { showMsg('NO AIR', 'НЕТ ВОЗДУХА', 1.2, '#7ff'); return; }
@@ -646,10 +653,13 @@ function updateFlight(dt) {
     G.vY = G.y > 1.5 ? -6 : 0;
     if (Math.random() < 0.6) mist.emit(shipPos.x, shipPos.y + 1, shipPos.z, 0, 4, 0, 1.6, 2, 7, 0.2, 0.18, 0.17, 0.5, -1, 0.5);
   } else if (G.phase === 'flight') {
-    const target = G.dive ? 34 : 62 + 32 * G.boost;
-    G.speed += (target - G.speed) * damp(boosting ? 1.3 : 0.9, dt);
-    const latMax = G.dive ? 15 : 30;
-    G.vLat += (ix * latMax - G.vLat) * damp(5, dt);
+    // round 14: once the hull is under, hydro drag pulls cruise to UW_FWD and caps lateral speed.
+    // Above the water the old targets stay: 34 while diving in, 62 + boost in air.
+    const submerged = G.underwater;
+    const target = submerged ? UW_FWD : (G.dive ? 34 : 62 + 32 * G.boost);
+    G.speed += (target - G.speed) * damp(submerged ? UW_DRAG : (boosting ? 1.3 : 0.9), dt);
+    const latMax = submerged ? UW_LAT : (G.dive ? 15 : 30);
+    G.vLat += (ix * latMax - G.vLat) * damp(submerged ? UW_LAT_K : 5, dt);
     let vYt;
     if (G.dive) vYt = G.y > -2 ? -20 : iy * 7;
     else vYt = G.y < 0.9 ? 16 : iy * 20;
@@ -1159,7 +1169,7 @@ function torpedoHit(t, bt) {
   bt.hp = Math.max(0, bt.hp - TORP_DMG[bt.type]); bt.flashT = 0.5;
   const c = bt.type === 'patrol' ? [0.6, 1.8, 2] : [2, 1.1, 0.4];
   for (let i = 0; i < 26; i++) sparks.emit(p.x, p.y, p.z, (Math.random() - 0.5) * 20, Math.random() * 10, (Math.random() - 0.5) * 20, 0.4, 1.2, 0.3, c[0], c[1], c[2], 1, 0, 3);
-  if (bt.hp <= 0) { TORP.kills++; killBoat(bt); }
+  if (bt.hp <= 0) { TORP.kills++; killBoat(bt, true); }
   else { audio.hitTick(); hitMarker(); popScore(`HULL ${Math.round((bt.hp / BOAT_HP) * 100)}% · ONE MORE / ЕЩЁ ОДНА`); }
 }
 function updateTorpedoes(dt) {
@@ -1712,16 +1722,41 @@ function hitBoat(bt, p) {
   audio.impact();
   if (bt.hp <= 0) killBoat(bt);
 }
-function killBoat(bt) {
+// round 14: a breach, not a debris bomb. Fire stays on the belly; the hull itself sinks in updateNaval.
+// `blasted` — a torpedo already played underwaterBlast, so don't stack a second explosion.
+function killBoat(bt, blasted = false) {
   if (!bt.alive) return;
   bt.alive = false; bt.sinkT = 0;
+  bt.list = bt.lat >= 0 ? -1 : 1;
   G.boatKills++;
-  explode(V4.copy(bt.deck).clone(), 1.4);
-  for (let i = 0; i < 8; i++) {
-    V4.set(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).normalize().multiplyScalar(12 + Math.random() * 16);
-    debris.emit(bt.deck, V4, 0.4 + Math.random() * 0.6, 0.8);
+  const p = V4.copy(bt.wp);
+  if (p.y > -0.35 || p.y < -6) p.y = -1.15;
+  for (let i = 0; i < 16; i++) {
+    sparks.emit(p.x, p.y, p.z, (Math.random() - 0.5) * 7, (Math.random() - 0.35) * 5, (Math.random() - 0.5) * 7,
+      0.4 + Math.random() * 0.4, 2.4, 7, 2.6, 0.85, 0.18, 1, -0.6, 1.6);
   }
-  splash(bt.deck, 120, 1.4);
+  sparks.emit(p.x, p.y, p.z, 0, 0, 0, 0.32, 7, 14, 2.8, 1.15, 0.32, 1);
+  for (let i = 0; i < 34; i++) {
+    const a = Math.random() * 6.28, v = 1 + Math.random() * 4;
+    mist.emit(p.x + (Math.random() - 0.5) * 2.4, p.y, p.z + (Math.random() - 0.5) * 2.4,
+      Math.cos(a) * v * 0.3, 2.2 + Math.random() * 5, Math.sin(a) * v * 0.3,
+      0.9 + Math.random(), 0.4, 1.6, 0.8, 0.98, 1, 0.85, -7, 1.7);
+  }
+  lightFlash(p, blasted ? 200 : 480, 0.5, 1, 0.46, 0.14);
+  if (!blasted) G.flash = { p: p.clone(), t: 0.34, big: 1.1, cold: false };
+  splash(bt.deck, blasted ? 46 : 84, blasted ? 0.65 : 1.05);
+  for (let i = 0; i < 7; i++) {
+    mist.emit(bt.deck.x + (Math.random() - 0.5) * 4, 0.7, bt.deck.z + (Math.random() - 0.5) * 4,
+      (Math.random() - 0.5) * 1.6, 2.5 + Math.random() * 3, (Math.random() - 0.5) * 1.6,
+      2, 2.2, 9, 0.24, 0.18, 0.14, 0.42, -0.35, 0.35);
+  }
+  const near = clamp(1 - camera.position.distanceTo(p) / 160, 0, 1);
+  if (!blasted) {
+    G.shake = Math.min(1.4, G.shake + 0.3 + 0.45 * near);
+    audio.explosion(0.8, near, panOf(p));
+    audio.splash();
+  }
+  audio.boatSink(panOf(p));
   navalKill(BOAT_PTS[bt.type], bt.type === 'patrol' ? 'PATROL BOAT / КАТЕР' : 'SMUGGLER / КОНТРАБАНДИСТ');
 }
 const armorEls = [];
@@ -1819,9 +1854,104 @@ function updatePunish(b, dt, time) {
   if (++b.punShots >= PUN_N) { b.pun = 'idle'; b.punCd = PUN_CD; }
 }
 
+// round 14: bow and stern stay a boat. They list, the stern goes down, the break opens, and both halves
+// sink with fire on the wound so the silhouette reads in the murk. No flying debris chunks.
+function drawSinkingBoat(b, i, dt, time, mF, mB) {
+  const t = b.sinkT;
+  // hold the break up in the bright surface window, then drop the whole wreck (bow included) past the camera
+  const crack = smoothstep(0.45, 2.5, t);
+  const list = (b.list || 1) * 0.62 * smoothstep(0.2, 3.4, t);
+  const sink = 0.45 * smoothstep(0, 1.8, t) + 6.6 * Math.pow(smoothstep(1.7, 6.6, t), 1.15);
+  const sep = 2.1 * crack;
+  const bowPitch = 0.22 * smoothstep(0.35, 2.6, t);
+  const sternPitch = 0.4 * smoothstep(0.3, 2.5, t);
+  const yaw = 0.5 * crack;
+  const fade = 1 - smoothstep(5.4, 6.95, t);
+  const breath = 0.7 + 0.3 * Math.sin(time * 11 + i);
+  if (!b.bowM) { b.bowM = new THREE.Matrix4(); b.sternM = new THREE.Matrix4(); }
+  const bow = b.bowM, stern = b.sternM;
+  bow.copy(b.M);
+  bow.multiply(M2.makeTranslation(0, -sink * 0.82, 0));
+  bow.multiply(M2.makeRotationZ(list));
+  bow.multiply(M2.makeTranslation(0.15 * crack, 0, -sep));
+  bow.multiply(M2.makeRotationY(-yaw));
+  bow.multiply(M2.makeRotationX(bowPitch));
+  stern.copy(b.M);
+  stern.multiply(M2.makeTranslation(0, -sink * 1.16 - 0.3 * crack, 0));
+  stern.multiply(M2.makeRotationZ(list * 0.9));
+  stern.multiply(M2.makeTranslation(-0.12 * crack, 0, sep));
+  stern.multiply(M2.makeRotationY(yaw * 0.6));
+  stern.multiply(M2.makeRotationX(sternPitch));
+  mF.setMatrixAt(i, bow);
+  mB.setMatrixAt(i, stern);
+  SINK_COL.setRGB(1, 0.34 + 0.2 * breath, 0.05);
+  boatM.panels.setColorAt(i, SINK_COL);
+  // small belly wound, not a slab between the halves
+  M1.copy(bow).multiply(M2.makeTranslation(0, -0.12, 0.15)).multiply(M2.makeScale(0.42, 1, 0.32));
+  boatM.panels.setMatrixAt(i, M1);
+  const at = (m, x, y, z, r, g, bl, a, size) => {
+    V1.set(x, y, z).applyMatrix4(m);
+    glows.add(V1.x, V1.y, V1.z, r, g, bl, a, size);
+  };
+  at(bow, 0, -0.45, 0.2, 2.6, 0.7, 0.14, 0.95 * breath * fade, 4.2);
+  at(bow, 0, -0.45, 0.2, 3.0, 1.6, 0.55, 0.9 * fade, 1.8);
+  at(bow, 0, 0.35, -6.3, 1.6, 1.55, 1.35, 0.8 * fade, 2.2);
+  at(bow, 2.05, 0.15, -2.4, 1.3, 0.85, 0.35, 0.45 * fade, 1.5);
+  at(bow, -2.05, 0.15, -2.4, 1.3, 0.85, 0.35, 0.45 * fade, 1.5);
+  at(stern, 0, -0.35, 0.1, 2.3, 0.5, 0.1, 0.6 * breath * fade, 3.4);
+  at(stern, 0, 1.35, 5.5, 2.2, 0.16, 0.06, (Math.sin(time * 8 + i) > -0.2 ? 0.9 : 0.22) * fade, 2.2);
+  at(stern, 2.05, 0.15, 2.8, 1.7, 0.4, 0.1, 0.4 * fade, 1.5);
+  at(stern, -2.05, 0.15, 2.8, 1.7, 0.4, 0.1, 0.4 * fade, 1.5);
+  V2.set(0, -0.4, 0.25).applyMatrix4(bow);
+  V1.set(0, -0.35, -0.1).applyMatrix4(stern);
+  beams.add(V2.x, V2.y, V2.z, V1.x, V1.y, V1.z, 0.7, 2.5, 0.75, 0.16, (0.55 + 0.45 * breath) * fade);
+  V3.set(0, -1.15, -6.2).applyMatrix4(bow);
+  V1.set(0, -1.15, -0.2).applyMatrix4(bow);
+  beams.add(V3.x, V3.y, V3.z, V1.x, V1.y, V1.z, 0.45, 1.8, 0.5, 0.12, 0.45 * fade);
+  V3.set(0, -1.15, 0.2).applyMatrix4(stern);
+  V1.set(0, -1.15, 6.2).applyMatrix4(stern);
+  beams.add(V3.x, V3.y, V3.z, V1.x, V1.y, V1.z, 0.45, 1.5, 0.35, 0.08, 0.4 * fade);
+  V1.set(0, -0.5, 0.3).applyMatrix4(bow);
+  const dx = V1.x - camera.position.x, dy = V1.y - camera.position.y, dz = V1.z - camera.position.z, d2 = dx * dx + dy * dy + dz * dz;
+  if (fade > 0.04 && d2 < 90 * 90 && d2 < wreckPick) {
+    wreckPick = d2;
+    wreckL.position.copy(V1);
+    wreckL.intensity = 160 * fade * (0.82 + 0.18 * breath);
+    wreckL.color.setRGB(1, 0.45, 0.14);
+  }
+  if (camUnder && sink < 2.6) {
+    pathBasis(b.s, boatWaterM);
+    boatWaterM.multiply(M2.makeRotationY(b.head)).setPosition(toWorld(b.s, b.lat, 0, V3));
+    const k = 1 - sink / 2.6;
+    M1.copy(boatWaterM).multiply(M2.makeTranslation(0, -0.3, 18)).multiply(M2.makeScale(44 * k, 1, 80 * k));
+    boatUFX.under.setMatrixAt(i, M1);
+  }
+  let n = (quality === 'low' ? 20 : quality === 'med' ? 46 : 64) * (t < 2.4 ? 1.35 : 0.65) * (0.35 + 0.65 * fade) * dt;
+  while (n > 0 && Math.random() < n) {
+    n -= 1;
+    const m = Math.random() < 0.7 ? bow : stern;
+    V1.set((Math.random() - 0.5) * 2.2, -0.5 - Math.random() * 0.4, (Math.random() - 0.5) * 1.6).applyMatrix4(m);
+    mist.emit(V1.x, V1.y, V1.z, (Math.random() - 0.5) * 0.8, 3.5 + Math.random() * 5.5, (Math.random() - 0.5) * 0.8,
+      1.3 + Math.random() * 1.1, 0.45, 2.4, 0.82, 0.97, 1, 0.88, -5, 1.2);
+  }
+  let nf = (quality === 'low' ? 8 : 16) * fade * dt;
+  while (nf > 0 && Math.random() < nf) {
+    nf -= 1;
+    const m = Math.random() < 0.5 ? bow : stern;
+    V1.set((Math.random() - 0.5) * 1.8, -0.45 + (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 1.2).applyMatrix4(m);
+    sparks.emit(V1.x, V1.y, V1.z, (Math.random() - 0.5) * 1.6, 0.3 + Math.random() * 1.4, (Math.random() - 0.5) * 1.6,
+      0.28 + Math.random() * 0.35, 1.1, 4.2, 2.5, 0.7 + Math.random() * 0.45, 0.12, 1, -0.4, 0.8);
+  }
+  if (t < 3.5 && Math.random() < dt * 8) {
+    mist.emit(b.deck.x + (Math.random() - 0.5) * 3, 0.6, b.deck.z + (Math.random() - 0.5) * 3,
+      (Math.random() - 0.5) * 1.5, 2.5 + Math.random() * 2, (Math.random() - 0.5) * 1.5,
+      2.2, 2, 8, 0.22, 0.18, 0.15, 0.4, -0.3, 0.3);
+  }
+}
 function updateNaval(dt, time) {
   const flying = G.phase === 'flight' || G.phase === 'landing';
   const sub = G.underwater && G.phase === 'flight';
+  wreckPick = 1e12;
   // ---- mines: bob on their chains, faint red blink, proximity fuse
   for (let i = 0; i < MINES.length; i++) {
     const m = MINES[i];
@@ -1951,27 +2081,16 @@ function updateNaval(dt, time) {
       b.head += ((b.dir > 0 ? 0 : Math.PI) - b.head) * damp(0.7, dt);
       b.lat = b.lat0 + Math.sin(time * 0.11 + i * 2) * 2.2 + Math.sin(b.head) * 3;
     } else b.sinkT += dt;
-    const bob = Math.sin(time * 1.3 + i) * 0.12;
+    const bob = b.alive ? Math.sin(time * 1.3 + i) * 0.12 : 0;
     pathBasis(b.s, b.M);
-    b.M.multiply(M2.makeRotationY(b.head)).multiply(M2.makeRotationX(Math.sin(time * 1.1 + i * 2) * 0.025)).multiply(M2.makeRotationZ(Math.sin(time * 0.9 + i) * 0.04));
+    b.M.multiply(M2.makeRotationY(b.head));
+    if (b.alive) b.M.multiply(M2.makeRotationX(Math.sin(time * 1.1 + i * 2) * 0.025)).multiply(M2.makeRotationZ(Math.sin(time * 0.9 + i) * 0.04));
     b.M.setPosition(toWorld(b.s, b.lat, bob, V3));
     if (b.alive) {
       mF.setMatrixAt(i, b.M); mB.setMatrixAt(i, b.M);
       boatM.panels.setMatrixAt(i, b.M);
     } else {
-      // broken in two: halves separate, tilt up and sink with bubbles
-      const k = smoothstep(0, 6.5, b.sinkT), sep = 2.4 * smoothstep(0, 1.6, b.sinkT), tilt = 0.6 * smoothstep(0, 3, b.sinkT), sink = 10 * Math.pow(k, 1.3);
-      M1.copy(b.M).multiply(M2.makeTranslation(0, -sink, -sep)).multiply(M2.makeRotationX(tilt));
-      mF.setMatrixAt(i, M1);
-      M1.copy(b.M).multiply(M2.makeTranslation(0, -sink * 1.15, sep)).multiply(M2.makeRotationX(-tilt * 0.8));
-      mB.setMatrixAt(i, M1);
-      boatM.panels.setMatrixAt(i, ZERO_M);
-      if (Math.random() < dt * 30) mist.emit(b.deck.x + (Math.random() - 0.5) * 8, Math.min(-0.5, -sink * 0.5), b.deck.z + (Math.random() - 0.5) * 8, (Math.random() - 0.5), 3 + Math.random() * 3, (Math.random() - 0.5), 1.5, 0.4, 1.4, 0.8, 1, 1, 0.7, -5, 1);
-      if (b.sinkT < 3 && Math.random() < dt * 20) {
-        mist.emit(b.deck.x, Math.max(0.5, 2 - sink), b.deck.z, (Math.random() - 0.5) * 2, 4 + Math.random() * 3, (Math.random() - 0.5) * 2, 2.5, 3, 12, 0.18, 0.16, 0.15, 0.55, -1, 0.5);
-        if (sink < 2) sparks.emit(b.deck.x + (Math.random() - 0.5) * 4, 1.5, b.deck.z + (Math.random() - 0.5) * 4, 0, 4 + Math.random() * 4, 0, 0.5, 2.5, 1, 2, 0.9, 0.3, 1, -2, 0);
-      }
-      if (b.sinkT > 3 && Math.random() < dt * 8 && sink < 4) splash(b.deck, 6, 0.4);
+      drawSinkingBoat(b, i, dt, time, mF, mB);
       continue;
     }
     toWorld(b.s, b.lat, BOAT_KEEL - 0.1, b.wp);
@@ -2082,6 +2201,8 @@ function updateNaval(dt, time) {
   boatUFX.under.visible = camUnder; boatUFX.wash.visible = camUnder && quality !== 'low';
   boatUFX.under.material.uniforms.uTime.value = boatUFX.wash.material.uniforms.uTime.value = time;
   boatMat.color.copy(camUnder ? HULL_UW : HULL_AIR);   // dark hull silhouette against the bright surface from below
+  if (boatM.panels.instanceColor) boatM.panels.instanceColor.needsUpdate = true;
+  if (wreckPick > 1e11) wreckL.intensity = 0;
   updateSpouts(dt);
   // first-encounter hints
   if (G.phase === 'flight') {
@@ -3262,6 +3383,8 @@ window.__lethe = {
       bracket: tgtEls.some((m) => m.torp && m.el.style.display === 'block'), cue: TUT.cueT > 0, cueSeen: TUT.cueSeen, rocketPulse: hud.rocketBtn.classList.contains('pulse') },
     punish: { tele: PUN.tele, bursts: PUN.bursts, dodgedDive: PUN.dodgedDive, hits: PUN.hits, dmg: PUN.dmg, active: BOATS.filter((b) => b.pun === 'tele' || b.pun === 'burst').length },
     fog: { density: scene.fog.density, color: scene.fog.color.toArray().map((x) => +x.toFixed(4)) },
+    // round 14: submerged cruise targets (air handling still uses 62 + 32*boost / lat 30 when hydro.under is false)
+    hydro: { under: G.underwater, fwd: UW_FWD, lat: UW_LAT, vLat: +G.vLat.toFixed(2), wreck: +wreckL.intensity.toFixed(1) },
   }),
   start: startGame,
   retry: () => { reset(); startGame(); },
@@ -3341,6 +3464,18 @@ window.__lethe = {
     // place the ship (path coords) and freeze its lateral/vertical velocity
     place: (s, lat = 0, y = null, dive = null) => {
       G.s = s; G.lat = lat; G.vLat = 0; G.vY = 0; if (y !== null) G.y = y; if (dive !== null) G.dive = dive; camInit = false;
+    },
+    // hold path position without clearing speed / vLat (round 14 handling probes)
+    pin: (s, lat = 0, y = null, dive = null) => {
+      G.s = s; G.lat = lat; if (y != null) G.y = y; if (dive != null) G.dive = dive;
+    },
+    sinkBoat: (i) => { const b = BOATS[i]; if (b && b.alive) killBoat(b); return !!b; },
+    boatPose: (i) => {
+      const b = BOATS[i]; if (!b) return null;
+      const yOf = (mesh) => { mesh.getMatrixAt(i, M1); const e = M1.elements; return { y: +e[13].toFixed(2), sx: +Math.hypot(e[0], e[1], e[2]).toFixed(2) }; };
+      const pt = b.type === 'patrol';
+      const bow = yOf(pt ? boatM.pF : boatM.sF), stern = yOf(pt ? boatM.pB : boatM.sB);
+      return { alive: b.alive, sinkT: +(b.sinkT || 0).toFixed(2), bowY: bow.y, sternY: stern.y, bowOn: bow.sx > 0.2, sternOn: stern.sx > 0.2, wreck: +wreckL.intensity.toFixed(1), list: b.list || 0 };
     },
     threat: (kind = 'turret', i = 0) => { const o = kind === 'turret' ? TURRETS[i] : DRONES[i]; threat(o, o.wp); return o.s; },
     damageShield: (n = 30) => damage(n, V4.copy(shipPos).addScaledVector(shipFwd, 6).clone(), 'debug'),
