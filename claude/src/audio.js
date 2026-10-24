@@ -29,6 +29,15 @@ export class Audio {
     this.musicOn = true;
     try { if (localStorage.getItem(LS_MUSIC) === '0') this.musicOn = false; } catch (e) { /* ignore */ }
     this.mI = 0; this.mStep = 0; this.mNext = 0;
+    // round 21: recorded score (Suno, Chinese instruments) as adaptive layers calm / tension / battle.
+    // ?music=suno (default) | proc (round 19 procedural) | duel (one long "slow to fast" track); ?mv=1|2 = v1 / v2 takes
+    // (default = the best-looping take per layer, see assets/music/music.json).
+    let P = null; try { P = new URLSearchParams(location.search); } catch (e) { /* ignore */ }
+    const mp = P && P.get('music'), mv = P && P.get('mv');
+    this.musicMode = mp === 'proc' || mp === 'duel' ? mp : 'suno';
+    this.musicSet = mv === '1' || mv === '2' ? mv : 'mix';
+    this.suno = { state: 'idle', layers: {}, cur: null, curT: 0, err: null, files: {} };
+    this.lowMem = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } })();
   }
   init() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
@@ -138,7 +147,21 @@ export class Audio {
     this.mBus.connect(this.mLP); this.mLP.connect(this.bus);
     const mv = c.createGain(); mv.gain.value = 0.12; this.mLP.connect(mv); mv.connect(this.verbIn);
     this.mPadLP = c.createBiquadFilter(); this.mPadLP.type = 'lowpass'; this.mPadLP.frequency.value = 900; this.mPadLP.Q.value = 0.7;
-    this.mPadLP.connect(this.mBus);
+    // round 21: procedural voices -> pBus, recorded layers -> sBus; both under mBus (level, mute, underwater, slow-mo)
+    this.pBus = c.createGain(); this.pBus.gain.value = 1; this.pBus.connect(this.mBus);
+    this.sBus = c.createGain(); this.sBus.gain.value = 0; this.sBus.connect(this.mBus);
+    this.mPadLP.connect(this.pBus);
+    // background tab: pause the whole graph (music would otherwise keep playing)
+    document.addEventListener('visibilitychange', () => {
+      if (!this.ctx) return;
+      if (document.hidden) { if (this.ctx.state === 'running') { this.ctx.suspend(); this.bgSuspended = true; } }
+      else if (this.bgSuspended) { this.bgSuspended = false; this.ctx.resume(); }
+    });
+    if (this.musicMode !== 'proc') {
+      // lazy: only after the page (and the loading bar) is done, never competing with the game's own assets
+      const go = () => setTimeout(() => this.loadSuno(), 200);
+      if (document.readyState === 'complete') go(); else addEventListener('load', go, { once: true });
+    }
   }
   osc(type, f, dest) {
     const o = this.ctx.createOscillator(); o.type = type; o.frequency.value = f;
@@ -430,7 +453,7 @@ export class Audio {
     if (o.glide) osc.frequency.exponentialRampToValueAtTime(osc.frequency.value * o.glide, t + a + d);
     let src = osc;
     if (o.lp) { const f = c.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = o.q || 1; f.frequency.setValueAtTime(o.lp, t); if (o.lpEnd) f.frequency.exponentialRampToValueAtTime(o.lpEnd, t + a + d); osc.connect(f); src = f; }
-    src.connect(g); g.connect(dest || this.mBus);
+    src.connect(g); g.connect(dest || this.pBus);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + a);
     if (o.hold) g.gain.setValueAtTime(Math.max(peak, 0.0002), t + a + o.hold);
@@ -441,7 +464,7 @@ export class Audio {
     const c = this.ctx, src = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain();
     src.buffer = this.noise; fl.type = type; fl.frequency.setValueAtTime(f, t); fl.Q.value = q;
     if (fEnd) fl.frequency.exponentialRampToValueAtTime(fEnd, t + d);
-    src.connect(fl); fl.connect(g); g.connect(this.mBus);
+    src.connect(fl); fl.connect(g); g.connect(this.pBus);
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
     src.start(t, Math.random() * 1.5); src.stop(t + d + 0.05);
   }
@@ -456,10 +479,107 @@ export class Audio {
     // intensity follows fast up, slowly down (a fight keeps the drums going a few seconds after it ends)
     const k = target > this.mI ? 1.6 : 0.22;
     this.mI += (target - this.mI) * (1 - Math.exp(-k * dt));
+    const useS = this.sunoMusic(mode, now);
+    this.set(this.pBus.gain, useS ? 0 : 1, useS ? 0.8 : 0.3);
+    this.set(this.sBus.gain, useS ? 0.85 : 0, useS ? 0.3 : 0.8);
     if (!on || this.mBus.gain.value < 0.002 && lvl === 0) { this.mNext = 0; return; }
+    if (useS && this.pBus.gain.value < 0.003) { this.mNext = 0; return; }   // procedural faded out: stop scheduling
     const STEP = 60 / 100 / 4;
     if (this.mNext < now - 0.25) { this.mNext = now + 0.06; }   // first start or after a stall: re-sync
     while (this.mNext < now + 0.18) { this.mStepAt(this.mStep, this.mNext, STEP); this.mNext += STEP; this.mStep++; }
+  }
+  // ---------------------------------------------------------------- round 21: recorded adaptive layers
+  async loadSuno() {
+    const S = this.suno;
+    if (S.state !== 'idle' || !this.ctx) return;
+    S.state = 'loading';
+    try {
+      const base = new URL('assets/music/', document.baseURI).href;
+      const r0 = await fetch(base + 'music.json');
+      if (!r0.ok) throw new Error('music.json ' + r0.status);
+      const man = await r0.json();
+      const want = this.musicMode === 'duel' ? { duel: man.duel[this.musicSet] } : man.sets[this.musicSet];
+      for (const layer of this.musicMode === 'duel' ? ['duel'] : ['calm', 'tension', 'battle']) {   // calm first: usable at once
+        const t = man.tracks[want[layer]];
+        const r = await fetch(base + t.file);
+        if (!r.ok) throw new Error(t.file + ' ' + r.status);
+        const buf = await this.decodeMusic(await r.arrayBuffer());
+        this.addLayer(layer, buf, t);
+        S.files[layer] = want[layer];
+      }
+      S.state = 'ready';
+    } catch (e) {
+      // any failure: keep whatever loaded; with nothing loaded the procedural score simply carries on
+      S.err = String(e && e.message || e);
+      S.state = Object.keys(S.layers).length ? 'partial' : 'failed';
+      console.warn('[music] recorded score unavailable (' + S.err + '), using ' + (S.state === 'failed' ? 'procedural' : 'loaded layers'));
+    }
+  }
+  decodeMusic(ab) {
+    const dec = (ctx, data) => new Promise((res, rej) => { const p = ctx.decodeAudioData(data, res, rej); if (p && p.then) p.then(res, rej); });
+    // phones: decode at 32 kHz into an offline context (half the memory of a 48 kHz float buffer), else the live rate
+    if (this.lowMem) {
+      try {
+        const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const keep = ab.slice(0);
+        return dec(new OC(2, 1, 32000), ab).catch(() => dec(this.ctx, keep));
+      } catch (e) { /* fall through */ }
+    }
+    return dec(this.ctx, ab);
+  }
+  addLayer(name, buf, t) {
+    const c = this.ctx, g = c.createGain();
+    g.gain.value = 0; g.connect(this.sBus);
+    const L = { name, buf, g, src: null, loopStart: Math.min(t.loopStart, buf.duration - 1), loopEnd: Math.min(t.loopEnd, buf.duration) };
+    this.suno.layers[name] = L;
+    this.startLayer(L, name === 'duel' ? 0 : L.loopStart);
+  }
+  startLayer(L, offset) {
+    if (L.src) { try { L.src.stop(); } catch (e) { /* ignore */ } L.src.disconnect(); }
+    const s = this.ctx.createBufferSource();
+    s.buffer = L.buf; s.loop = true; s.loopStart = L.loopStart; s.loopEnd = L.loopEnd;
+    s.playbackRate.value = 1 - 0.2 * this.slowK;
+    s.connect(L.g); s.start(this.ctx.currentTime + 0.02, offset);
+    L.src = s;
+  }
+  // new run: the duel track starts again from its slow opening
+  musicRestart() {
+    const L = this.suno.layers.duel;
+    if (L && this.ctx) this.startLayer(L, 0);
+  }
+  // pick the layer from the smoothed danger (hysteresis + minimum dwell) and crossfade; false = no recorded layer yet
+  sunoMusic(mode, now) {
+    const S = this.suno, Ls = S.layers;
+    if (this.musicMode === 'proc' || !Object.keys(Ls).length) return false;
+    const I = this.mI, dwell = now - S.curT;
+    let want;
+    if (Ls.duel) want = 'duel';
+    else {
+      want = S.cur || 'calm';
+      if (mode === 'menu') want = 'calm';
+      else if (want === 'calm') { if (I > 0.78) want = 'battle'; else if (I > 0.5) want = 'tension'; }
+      else if (want === 'tension') { if (I > 0.78) want = 'battle'; else if (I < 0.36 && dwell > 6) want = 'calm'; }
+      else if (want === 'battle') { if (I < 0.55 && dwell > 5) want = I < 0.36 ? 'calm' : 'tension'; }
+      // not loaded yet: the nearest calmer layer that is
+      const order = ['calm', 'tension', 'battle'];
+      for (let i = order.indexOf(want); i >= 0 && !Ls[want]; i--) want = order[i];
+      if (!Ls[want]) return false;
+    }
+    if (want !== S.cur) {
+      const up = !S.cur || ['calm', 'tension', 'battle'].indexOf(want) > ['calm', 'tension', 'battle'].indexOf(S.cur);
+      for (const k in Ls) Ls[k].g.gain.setTargetAtTime(k === want ? 1 : 0, now, k === want ? (up ? 0.55 : 0.9) : (up ? 0.8 : 1.0));
+      S.cur = want; S.curT = now;
+    }
+    const rate = 1 - 0.2 * this.slowK;
+    for (const k in Ls) if (Ls[k].src && Math.abs(Ls[k].src.playbackRate.value - rate) > 0.002) this.set(Ls[k].src.playbackRate, rate, 0.12);
+    return true;
+  }
+  musicInfo() {
+    const S = this.suno, g = {};
+    for (const k in S.layers) g[k] = +S.layers[k].g.gain.value.toFixed(3);
+    return { mode: this.musicMode, set: this.musicSet, state: S.state, layer: S.cur, files: S.files, gains: g, err: S.err,
+      source: this.musicMode !== 'proc' && Object.keys(S.layers).length ? 'suno' : 'proc',
+      pBus: this.pBus ? +this.pBus.gain.value.toFixed(3) : null, sBus: this.sBus ? +this.sBus.gain.value.toFixed(3) : null, ctx: this.ctx ? this.ctx.state : null };
   }
   mStepAt(st, t, STEP) {
     const I = this.mI, sm = (a, b) => { const x = Math.min(1, Math.max(0, (I - a) / (b - a))); return x * x * (3 - 2 * x); };

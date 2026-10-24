@@ -3505,6 +3505,7 @@ function reset() {
 function startGame() {
   if (G.phase !== 'start') return;
   if (!navigator.userActivation || navigator.userActivation.isActive) audio.init();
+  audio.musicRestart?.();
   $('start').classList.add('hide');
   $('result').classList.add('hide');
   document.body.classList.add('playing');
@@ -3605,7 +3606,9 @@ addEventListener('keydown', (e) => {
   }
 });
 const unlock = () => audio.init();
+// iOS Safari only unlocks Web Audio inside some gesture events: cover touchend / click as well
 addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
+addEventListener('touchend', unlock, { passive: true }); addEventListener('click', unlock);
 
 addEventListener('resize', () => {
   post.resize(innerWidth, innerHeight, DEVICE_DPR);
@@ -3968,7 +3971,7 @@ window.__lethe = {
     rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol, engineSound: audio.engine,
     aim: aimObj ? (TURRETS.includes(aimObj) ? 'turret' : DRONES.includes(aimObj) ? 'drone' : MINES.includes(aimObj) ? 'mine' : HUNTERS.includes(aimObj) ? 'hunter'
       : BOATS.includes(aimObj) ? 'boat' : isCore(aimObj) ? 'core' : 'relay') : null, turretKills: G.turretKills,
-    music: { on: audio.musicOn, intensity: +(audio.mI || 0).toFixed(3), target: +musicIntensity().toFixed(3), step: audio.mStep || 0 },
+    music: { on: audio.musicOn, intensity: +(audio.mI || 0).toFixed(3), target: +musicIntensity().toFixed(3), step: audio.mStep || 0, ...audio.musicInfo() },
     checkpoint: { cp: G.cp, n: CP_N, deaths: G.deaths, invuln: +G.invuln.toFixed(2), on: CP_ON, list: CHECKPOINTS },
     gate: { up: GATE.up, hold: GATE.hold, s: GATE_S, cores: GATE.cores.map((c) => (c.alive ? c.hp : 0)), coreKills: G.coreKills }, act: G.act,
     mission: { shots: G.shots, shotHits: G.shotHits, deaths: G.deaths, killsTotal: G.killsTotal ?? null, accuracy: G.accuracy ?? null },

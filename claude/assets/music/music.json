@@ -1,0 +1,123 @@
+{
+ "note": "LETHE r21 music (Suno, commercial use on the owner's paid plan). Each file: loop region [loopStart, loopEnd] in seconds; the end is crossfaded into the pre-loop audio, so AudioBufferSourceNode loop points are seamless. All loops normalised to -16 LUFS.",
+ "sets": {
+  "mix": {
+   "calm": "calm-v2",
+   "tension": "tension-v1",
+   "battle": "battle-v2"
+  },
+  "1": {
+   "calm": "calm-v1",
+   "tension": "tension-v1",
+   "battle": "battle-v1"
+  },
+  "2": {
+   "calm": "calm-v2",
+   "tension": "tension-v2",
+   "battle": "battle-v2"
+  }
+ },
+ "duel": {
+  "mix": "duel-v2",
+  "1": "duel-v1",
+  "2": "duel-v2"
+ },
+ "tracks": {
+  "calm-v1": {
+   "file": "calm-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 99.336077,
+   "dur": 99.836,
+   "src": "LETHE - Calm Canyon v1.mp3",
+   "srcLoop": [
+    24.52,
+    123.356
+   ],
+   "lufs": -16.0
+  },
+  "calm-v2": {
+   "file": "calm-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 113.442902,
+   "dur": 113.943,
+   "src": "LETHE - Calm Canyon v2.mp3",
+   "srcLoop": [
+    46.07,
+    159.013
+   ],
+   "lufs": -16.0
+  },
+  "tension-v1": {
+   "file": "tension-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 72.496077,
+   "dur": 72.996,
+   "src": "LETHE - Tension v1.mp3",
+   "srcLoop": [
+    59.44,
+    131.436
+   ],
+   "lufs": -16.0
+  },
+  "tension-v2": {
+   "file": "tension-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 56.150181,
+   "dur": 56.65,
+   "src": "LETHE - Tension v2.mp3",
+   "srcLoop": [
+    53.96,
+    109.61
+   ],
+   "lufs": -16.0
+  },
+  "battle-v1": {
+   "file": "battle-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 66.665986,
+   "dur": 67.166,
+   "src": "LETHE - Battle v1.mp3",
+   "srcLoop": [
+    10.68,
+    76.846
+   ],
+   "lufs": -16.0
+  },
+  "battle-v2": {
+   "file": "battle-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 61.770091,
+   "dur": 62.27,
+   "src": "LETHE - Battle v2.mp3",
+   "srcLoop": [
+    20.87,
+    82.14
+   ],
+   "lufs": -16.0
+  },
+  "duel-v1": {
+   "file": "duel-v1.mp3",
+   "loopStart": 74.79,
+   "loopEnd": 115.933991,
+   "dur": 116.434,
+   "src": "LETHE - Duel (Slow to Fast) v1.mp3",
+   "srcLoop": [
+    74.79,
+    115.934
+   ],
+   "lufs": -16.0
+  },
+  "duel-v2": {
+   "file": "duel-v2.mp3",
+   "loopStart": 153.79,
+   "loopEnd": 186.557891,
+   "dur": 187.058,
+   "src": "LETHE - Duel (Slow to Fast) v2.mp3",
+   "srcLoop": [
+    153.79,
+    186.558
+   ],
+   "lufs": -16.0
+  }
+ }
+}

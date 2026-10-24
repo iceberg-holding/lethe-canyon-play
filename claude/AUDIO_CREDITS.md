@@ -1,6 +1,11 @@
 # Audio credits — LETHE / ЛЕТА "Delivery" (variant `claude`)
 
-**All sound in this build is procedural.** There are no audio sample files, no recordings and no third-party
+**Music (round 21):** the level score in `assets/music/` (calm / tension / battle layers and the "Duel" track,
+Chinese instruments) was generated with Suno on the owner's paid plan, which grants commercial use. The files were
+trimmed into seamless loops and loudness-normalised (-16 LUFS); loop points are in `assets/music/music.json`.
+With `?music=proc`, or if the files fail to load, the round 19 procedural score below plays instead.
+
+**All sound effects in this build are procedural.** There are no sound-effect sample files, no recordings and no third-party
 sound assets: every sound is synthesised at runtime with the Web Audio API in `src/audio.js`
 (oscillators, a generated white-noise buffer, biquad filters, a wave-shaper, a delay-feedback slap echo,
 a `ConvolverNode` fed with a procedurally generated canyon impulse response, stereo panners and compressors).
