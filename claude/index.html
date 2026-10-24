@@ -97,6 +97,21 @@
   #tut{position:absolute;left:50%;top:max(calc(84px + var(--st)),15%);transform:translate(-50%,6px) scale(.97);text-align:center;opacity:0;pointer-events:none;
     transition:opacity .35s,transform .35s;padding:14px 30px 16px;background:radial-gradient(closest-side,rgba(12,6,4,.66),rgba(12,6,4,.45) 55%,rgba(12,6,4,0));white-space:nowrap}
   #tut.on{opacity:1;transform:translate(-50%,0) scale(1)}
+  /* round 17: per-threat intro prompt (same look as the boat tutorial) */
+  #intro{position:absolute;left:50%;top:max(calc(84px + var(--st)),15%);transform:translate(-50%,6px) scale(.97);text-align:center;opacity:0;pointer-events:none;
+    transition:opacity .35s,transform .35s;padding:14px 30px 16px;background:radial-gradient(closest-side,rgba(12,6,4,.66),rgba(12,6,4,.45) 55%,rgba(12,6,4,0));white-space:nowrap}
+  #intro.on{opacity:1;transform:translate(-50%,0) scale(1)}
+  #intro .tl{font-size:clamp(24px,3.4vw,42px);font-weight:600;letter-spacing:.03em;color:#fff4e4;text-shadow:0 0 18px rgba(255,140,60,.55),0 2px 3px rgba(0,0,0,.7);line-height:1.1}
+  #intro .te{font-size:clamp(12px,1.5vw,18px);font-weight:500;letter-spacing:.28em;color:#ffc37e;margin-top:4px;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+  #intro .tx{margin-top:8px;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+  #intro .tk{font-size:13px;letter-spacing:.1em;color:#f6efe6}
+  #intro .tk i{font-style:normal;color:var(--dim)}
+  #intro .tc{font-size:11px;letter-spacing:.06em;color:#bff8f0;margin-top:4px}
+  #intro .tc i{display:block;font-style:normal;color:rgba(191,248,240,.7);font-size:10px}
+  #intro kbd{display:inline-block;font:inherit;font-weight:700;color:#1d1410;background:#ece6d8;border-radius:4px;padding:0 7px;margin:0 2px;box-shadow:0 2px 0 rgba(0,0,0,.45)}
+  #intro .tt{display:none;color:#8ff4ea}
+  .touch #intro .tt{display:inline} .touch #intro .dk{display:none}
+  @media (max-height:500px){ #intro{top:calc(56px + var(--st));padding:8px 22px 10px} #intro .tl{font-size:28px} #intro .te{font-size:12px} #intro .tx{margin-top:4px} #intro .tk{font-size:12px} #intro .tc{font-size:10px} #intro .tc i{font-size:9px} }
   #tut .tl{font-size:clamp(24px,3.4vw,42px);font-weight:600;letter-spacing:.03em;color:#fff4e4;text-shadow:0 0 18px rgba(255,140,60,.55),0 2px 3px rgba(0,0,0,.7);line-height:1.1}
   #tut .te{font-size:clamp(12px,1.5vw,18px);font-weight:500;letter-spacing:.28em;color:#ffc37e;margin-top:4px;text-shadow:0 1px 3px rgba(0,0,0,.8)}
   #tut .tr{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:8px}
@@ -378,6 +393,7 @@
   <div id="pop"></div>
   <div id="act"></div>
 <div id="toast"></div>
+  <div id="intro"></div>
   <div id="tut">
     <div class="tl">Нырни и пускай торпеду <kbd class="dk">R</kbd></div>
     <div class="te">DIVE, THEN FIRE A TORPEDO <span class="dk">[R]</span></div>

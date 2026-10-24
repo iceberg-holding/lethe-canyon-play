@@ -31,9 +31,11 @@ const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { retur
 const lsSet = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
 const tipsParam = params.get('tips');   // ?tips=0 / ?tips=1 override for this page load only (tests)
 let tipsOn = tipsParam !== null ? tipsParam !== '0' : lsGet(TIPS_KEY) !== '0';
-if (tipsParam === '1') lsSet(TUT_KEY, null);
+// round 17: per-threat intro prompts (drone, turret) — one key each, re-armed with the boat tutorial
+const INTRO_KEYS = { drone: 'lethe.tips.drone', turret: 'lethe.tips.turret' };
+if (tipsParam === '1') { lsSet(TUT_KEY, null); for (const k of Object.values(INTRO_KEYS)) lsSet(k, null); }
 const tutArmed = () => tipsOn && lsGet(TUT_KEY) !== '1';
-const TUT_R = 400, TUT_SLOW = 0.3, TUT_EASE = 0.4, TUT_HOLD = 2.1, TUT_PROMPT = 4;
+const TUT_R = 300, TUT_SLOW = 0.3, TUT_EASE = 0.4, TUT_HOLD = 3.0, TUT_PROMPT = 6;   // round 17: later trigger (drones first), longer hold + prompt
 const TUT_CUE = 7;   // round 12: seconds after the tutorial dive during which a torpedo lock pulses the ROCKET button
 const TUT = { cueT: 0, cueSeen: false, phase: 'idle', t: 0, boat: null, hold: false, dist: 0, dived: false, outAt: 0, minScale: 1, count: 0, frozen: false, triggerAt: null, releaseAt: null, triggerS: null };
 let timeScale = 1;
@@ -268,7 +270,7 @@ for (const h of HUNTERS) { h.wp = new THREE.Vector3(0, -1e4, 0); h.nose = new TH
 for (const b of BOATS) { b.wp = new THREE.Vector3(0, -1e4, 0); b.deck = new THREE.Vector3(0, -1e4, 0); b.gun = new THREE.Vector3(); b.mast = new THREE.Vector3(); b.M = new THREE.Matrix4(); b.scan = 'off'; }
 // round 11: the first two boats of the run (by position along the river) are gentler: slower, longer gun cooldown
 for (const [k, b] of BOATS.slice(0, N_BOAT_REAL).sort((a, c) => a.home - c.home).entries()) b.easy = k < 2;
-const EASY_PACE = 0.65, TUTOR_PACE = 0.6, EASY_CD = 1.6;
+const EASY_PACE = 0.65, TUTOR_PACE = 0.5, EASY_CD = 1.6;   // round 17: tutorial boat slower
 const boatPace = (b) => (b === TUT.boat ? TUTOR_PACE : b.easy ? EASY_PACE : 1);
 const boatCdMul = (b) => (b.easy ? EASY_CD : 1);
 const MINE_TRIG = 4.6, MINE_DMG = 34, MINE_PTS = 120, HUNTER_PTS = 180, BOAT_PTS = { patrol: 400, smuggler: 300 }, BOAT_HP = 6;
@@ -354,7 +356,7 @@ const hud = {
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
   dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'), tut: $('tut'),
   pR: $('pR'), dampCue: $('dampCue'),
-  act: $('act'), routeBar: $('routeBar'),   // round 16 (null-guarded: an old index.html must not crash the loop)
+  act: $('act'), routeBar: $('routeBar'), intro: $('intro'),   // round 16 (null-guarded: an old index.html must not crash the loop)
 };
 for (let i = 0; i < ROCKET_AMMO; i++) hud.pips.appendChild(document.createElement('i'));
 const zoneEls = ZONES.map((z) => {
@@ -1355,7 +1357,7 @@ function updateLethe(dt, time) {
     d.spotting = true;
     G.spotters++;
     threat(d, d.wp);
-    if (!G.droneHinted) {
+    if (!G.droneHinted && !introArmed('drone')) {   // round 17: the intro prompt replaces this toast while armed
       G.droneHinted = true;
       toast('<b>Drones = LETHE\'s eyes.</b> Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i>', 5);
     }
@@ -3180,7 +3182,7 @@ function updateMarkers(rdt) {
       const seen = G.seen[c.kind];
       if (!seen) {
         G.seen[c.kind] = { o: c.o, t: 4.5 };
-        if (c.kind === 'turret' && !G.turretHinted) {
+        if (c.kind === 'turret' && !G.turretHinted && !introArmed('turret')) {
           G.turretHinted = true;
           toast('<b>Turrets on the rims fire when a drone marks you.</b> Shoot them or the drone.<br><i>Турели стреляют по метке дрона — сбей их или дрон.</i>', 6);
         }
@@ -3380,6 +3382,7 @@ function toMenu() {
 
 function reset() {
   endTutorial(); TUT.phase = 'idle'; TUT.boat = null;
+  endIntro(); INTRO.shown = [];
   resetLevel();
   for (let i = N_DRONE_REAL; i < DRONES.length; i++) DRONES[i].alive = false;
   for (let i = N_MINE_REAL; i < MINES.length; i++) MINES[i].alive = false;
@@ -3470,7 +3473,7 @@ const tipsSeg = document.querySelector('#tipsSel .seg');
 function syncTips() { for (const b of tipsSeg.children) b.classList.toggle('on', (b.dataset.v === '1') === tipsOn); }
 function setTips(on) {
   tipsOn = on; lsSet(TIPS_KEY, on ? '1' : '0');
-  if (on) { lsSet(TUT_KEY, null); if (TUT.phase === 'done') TUT.phase = 'idle'; }
+  if (on) { lsSet(TUT_KEY, null); for (const k of Object.values(INTRO_KEYS)) lsSet(k, null); if (TUT.phase === 'done') TUT.phase = 'idle'; }
   syncTips();
 }
 for (const b of tipsSeg.children) {
@@ -3604,6 +3607,51 @@ function endTutorial() {
   document.body.classList.remove('tutorial');
 }
 
+// ------------------------------------------------------------------ round 17: tutorial-by-play — one threat at a time
+// Zone 0 has drones only, zone 1 a single rim turret only (world.js). The first time each one comes into view a big
+// prompt (same style as the boat tutorial) explains it under a light slow-mo; shown once per device while TIPS is on.
+const INTRO_SLOW = 0.5, INTRO_DUR = 3.2;
+const INTRO_TXT = {
+  drone: { ru: 'Дрон — сбей его', en: 'DRONE — SHOOT IT DOWN', key: '<span class="dk">hold <kbd>Space</kbd> / <kbd>LMB</kbd> to fire <i>· зажми огонь</i></span><span class="tt">hold <b>FIRE</b> <i>· зажми ОГОНЬ</i></span>',
+    sub: 'drones are LETHE\'s eyes — they mark you for the turrets. Or dive to hide.<i>дроны — глаза ЛЕТЫ, метят тебя для турелей. Или нырни.</i>' },
+  turret: { ru: 'Турель на краю — сбей её', en: 'RIM TURRET — SHOOT IT', key: '<span class="dk">climb <kbd>W</kbd>, aim up, hold <kbd>Space</kbd> <i>· набери высоту и стреляй</i></span><span class="tt">climb, hold <b>FIRE</b> <i>· вверх и ОГОНЬ</i></span>',
+    sub: 'alone it fires blind — with a drone\'s mark it hits hard. Weave and dive.<i>без метки дрона стреляет вслепую, с меткой — точно. Маневрируй и ныряй.</i>' },
+};
+const INTRO = { kind: null, t: 0, shown: [] };
+const introArmed = (k) => tipsOn && lsGet(INTRO_KEYS[k]) !== '1' && G.phase === 'flight' && TUT.phase !== 'active' && !INTRO.kind;
+function startIntro(k) {
+  const T = INTRO_TXT[k];
+  INTRO.kind = k; INTRO.t = 0; INTRO.shown.push(k);
+  lsSet(INTRO_KEYS[k], '1');
+  if (hud.intro) {
+    hud.intro.innerHTML = `<div class="tl">${T.ru}</div><div class="te">${T.en}</div><div class="tx"><div class="tk">${T.key}</div><div class="tc">${T.sub}</div></div>`;
+    hud.intro.classList.add('on');
+  }
+  audio.tutorialSting();
+  document.body.classList.add('tutorial');
+}
+function endIntro() {
+  if (!INTRO.kind) return;
+  INTRO.kind = null;
+  hud.intro?.classList.remove('on');
+  if (TUT.phase !== 'active') { timeScale = 1; audio.slowmo(0); document.body.classList.remove('tutorial'); }
+}
+function introWatch() {
+  // first live drone / rim turret close ahead while flying above water -> its intro (the toast hint is skipped then)
+  if (G.underwater || G.dive) return;
+  if (!G.droneHinted && introArmed('drone')) for (const d of DRONES) if (d.alive && d.s > G.s - 5 && d.wp.distanceTo(shipPos) < 255) { G.droneHinted = true; startIntro('drone'); return; }
+  if (!G.turretHinted && introArmed('turret')) for (const t of TURRETS) if (t.alive && t.s > G.s - 5 && t.wp.distanceTo(shipPos) < 230) { G.turretHinted = true; G.seen.turret = G.seen.turret || { o: t, t: 4.5 }; startIntro('turret'); return; }
+}
+function updateIntro(rdt) {
+  if (!INTRO.kind) { if (G.phase === 'flight') introWatch(); return; }
+  if (G.phase !== 'flight' || TUT.phase === 'active') { endIntro(); return; }
+  if (!frozen) INTRO.t += Math.min(rdt, 0.1);
+  const depth = smoothstep(0, 0.35, INTRO.t) * (1 - smoothstep(INTRO_DUR - 0.5, INTRO_DUR, INTRO.t));
+  timeScale = 1 - (1 - INTRO_SLOW) * depth;
+  audio.slowmo(depth * 0.6);
+  if (INTRO.t >= INTRO_DUR) endIntro();
+}
+
 // ------------------------------------------------------------------ main loop
 const clock = new THREE.Clock();
 let pxScale = 600;
@@ -3621,6 +3669,7 @@ function loop() {
   if (frozen) dt = 0;   // debug: freeze the simulation (cinematic shots)
   // round 11: tutorial slow-mo = one global time scale on the shared dt (1 outside the tutorial)
   updateTutorial(realDt);
+  updateIntro(realDt);
   dt *= timeScale;
   time += dt;
   simTime = time;
@@ -3765,6 +3814,7 @@ window.__lethe = {
       divePulse: hud.dive.classList.contains('pulse'), hold: TUT.hold, dived: TUT.dived, dist: +TUT.dist.toFixed(1), count: TUT.count, boat: BOATS.indexOf(TUT.boat),
       triggerAt: TUT.triggerAt, releaseAt: TUT.releaseAt, triggerS: TUT.triggerS, tips: tipsOn, seen: lsGet(TUT_KEY) === '1', armed: tutArmed() },
     timeScale: +timeScale.toFixed(3),
+    intro: { kind: INTRO.kind, t: +INTRO.t.toFixed(2), shown: INTRO.shown.slice(), prompt: !!hud.intro?.classList.contains('on') },
     // round 12
     dmgTaken: +G.dmgTaken.toFixed(1), uwCam: +G.uwCam.toFixed(3), camUnder,
     torpedo: { lock: !!TORP.target, target: BOATS.indexOf(TORP.target), lockT: +TORP.lockT.toFixed(2), dist: TORP.target ? +TORP.target.wp.distanceTo(shipPos).toFixed(1) : null,

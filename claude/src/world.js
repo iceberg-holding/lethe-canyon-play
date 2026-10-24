@@ -246,6 +246,23 @@ ZONES.forEach((z, zi) => {
   }
 });
 TURRETS.sort((a, b) => a.s - b.s);
+// Round 17: tutorial-by-play. Threats are introduced one at a time before they are combined:
+//   zone 0 = drones only (no rim turret), pulled in front of the first boat so the boat tutorial gets a clean stage;
+//   zone 1 = one rim turret alone (no drones) after the boat; from zone 2 on, the regular mix.
+// Applied as a post-filter so the seeded layout of every other zone stays exactly as before.
+{
+  const z0 = ZONES[0], z1 = ZONES[1];
+  const z1t = TURRETS.filter((t) => t.zone === z1);
+  const keepT = z1t[z1t.length - 1];
+  for (let i = TURRETS.length - 1; i >= 0; i--) { const t = TURRETS[i]; if (t.zone === z0 || (t.zone === z1 && t !== keepT)) TURRETS.splice(i, 1); }
+  for (let i = DRONES.length - 1; i >= 0; i--) if (DRONES[i].s >= z1.s0 && DRONES[i].s < z1.s1) DRONES.splice(i, 1);
+  const d0 = DRONES.filter((d) => d.s >= z0.s0 && d.s < z0.s1);
+  for (let k = 1; k < d0.length; k++) {
+    const d = d0[k], ns = d0[0].s - 70 * k;
+    d.lat *= riverHalf(ns) / riverHalf(d.s); d.s = ns;
+  }
+  DRONES.sort((a, b) => a.s - b.s);
+}
 // a section stays linked while any of its relays stands; a zone without relays (none in this layout) is always linked
 export const zoneLinked = (z) => !z || !z.relays.length || z.relays.some((r) => r.alive);
 
