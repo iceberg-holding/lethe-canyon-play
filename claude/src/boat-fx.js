@@ -1,4 +1,3 @@
-
 // Shared instanced water effects: fixed draw budget, no per-boat lights or textures.
 import * as THREE from 'three';
 const NOISE = `float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
@@ -127,5 +126,3 @@ export function buildShockRings(n = 6) {
     live() { return rings.reduce((n, r) => n + (r.on ? 1 : 0), 0); },
   };
 }
-
-

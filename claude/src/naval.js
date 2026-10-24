@@ -1,4 +1,3 @@
-
 // Round 4 naval layer meshes: tethered mines (+ chains, sinkers), LETHE hunter-subs, smuggler / patrol boats
 // (bow + stern halves so a destroyed boat breaks apart) with a glowing belly weak point, and the LETHE rim turret.
 // Everything is instanced: one draw call per mesh type.
@@ -250,5 +249,3 @@ export function buildTurretMountGeo() {
     colored(tr(new THREE.BoxGeometry(4.2, 0.4, 4.2), 0, -0.75, 0), plate),
   ]);
 }
-
-

@@ -1,4 +1,3 @@
-
 // Canyon spline, cross-section profile functions and procedural level layout.
 // Everything is expressed in "path space": s = distance along the canyon,
 // lat = lateral offset (right positive), y = height above river surface.
@@ -170,6 +169,11 @@ export const WRECK = { s: 2960, side: -1 };
   ROCKS.push({ s: WRECK.s, lat: WRECK.lat, r: 4.5, h: 4.5, boulder: true, wreck: true, seed: 0 });
   ROCKS.sort((a, b) => a.s - b.s);
 }
+
+// Round 16 finale: the LETHE gate spans the canyon ~0.5 km before settlement B. Its approach is kept clear of rock columns
+// (the ship hovers in front of it while the generators are up).
+export const GATE_S = PAD_B - 540, GATE_HOLD = 58, GATE_BEAM = 46;
+for (let i = ROCKS.length - 1; i >= 0; i--) if (ROCKS[i].s > GATE_S - 150 && ROCKS[i].s < GATE_S + 40) ROCKS.splice(i, 1);
 
 // Shield zones: each one has a force-field emitter mast.
 export const ZONES = [];
@@ -348,5 +352,3 @@ export function resetLevel() {
   for (const h of HUNTERS) { h.alive = !h.debug; h.s = h.home; }
   for (const b of BOATS) { b.alive = !b.debug; b.s = b.home; b.lat = b.lat0; b.dir = b.dir0; }
 }
-
-

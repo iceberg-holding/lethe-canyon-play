@@ -309,6 +309,22 @@
   #stats div{font-size:8.5px;letter-spacing:.26em;color:var(--dim);font-weight:500}
   #stats b{display:block;font-size:24px;font-weight:300;color:#fff;margin-top:5px;letter-spacing:.02em;font-variant-numeric:tabular-nums}
   #stats .big b{color:var(--amber)}
+  /* round 16: mission-complete detail row, buttons, act banner, route ticks */
+  #stats2{display:flex;flex-wrap:wrap;gap:6px 22px;margin:-10px 0 22px;max-width:820px}
+  #stats2 div{font-size:7.5px;letter-spacing:.22em;color:var(--dim);font-weight:500}
+  #stats2 b{display:block;font-size:13px;font-weight:400;color:rgba(255,255,255,.82);margin-top:3px;font-variant-numeric:tabular-nums}
+  .rbtns{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  button.ghost{background:transparent;border:1px solid rgba(255,240,225,.35);color:#fff;font:inherit;font-size:12px;letter-spacing:.24em;padding:14px 22px;cursor:pointer;border-radius:2px}
+  button.ghost small{display:block;font-size:8px;opacity:.6;letter-spacing:.2em;margin-top:3px}
+  button.ghost:hover{border-color:var(--amber)}
+  #act{position:absolute;left:50%;top:30%;transform:translate(-50%,0);text-align:center;pointer-events:none;opacity:0;white-space:nowrap}
+  #act b{display:block;font-size:clamp(20px,3.4vw,40px);font-weight:200;letter-spacing:.32em;color:#fff;text-shadow:0 0 18px rgba(0,0,0,.7)}
+  #act span{display:block;font-size:clamp(10px,1.3vw,14px);letter-spacing:.4em;color:var(--amber);margin-top:6px}
+  #act i{display:block;font-style:normal;font-size:10px;letter-spacing:.14em;color:var(--dim);margin-top:8px}
+  #act.on{animation:actIn 3.6s ease forwards}
+  @keyframes actIn{0%{opacity:0;letter-spacing:.6em}12%{opacity:1}78%{opacity:1}100%{opacity:0}}
+  #routeBar .gt{position:absolute;top:-4px;width:3px;height:11px;margin-left:-1px;background:#ff5a3a;box-shadow:0 0 6px #ff5a3a}
+  #routeBar .at{position:absolute;top:-2px;width:1px;height:7px;background:rgba(255,240,225,.55)}
   #rotate{display:none;z-index:40;background:#140a07;align-items:center;justify-content:center;flex-direction:column;gap:18px;font-size:12px;letter-spacing:.3em;text-align:center;line-height:1.8}
   @media (orientation:portrait) and (max-width:900px){ #rotate{display:flex} }
   .phone{width:40px;height:70px;border:1.5px solid var(--amber);border-radius:8px;animation:rot 2.2s infinite ease-in-out}
@@ -360,7 +376,8 @@
   <div id="airBox"><div class="lbl"><span>AIR <i>/ ВОЗДУХ</i></span><b id="tAir">60s</b></div><div class="bar" id="bAir"><div class="v"></div></div></div>
   <div id="msg"></div>
   <div id="pop"></div>
-  <div id="toast"></div>
+  <div id="act"></div>
+<div id="toast"></div>
   <div id="tut">
     <div class="tl">Нырни и пускай торпеду <kbd class="dk">R</kbd></div>
     <div class="te">DIVE, THEN FIRE A TORPEDO <span class="dk">[R]</span></div>
@@ -430,20 +447,30 @@
   <div id="rSub">ДОСТАВЛЕНО</div>
   <div id="stats">
     <div>TIME / ВРЕМЯ<b id="rTime"></b></div>
+    <div>KILLS / УНИЧТОЖЕНО<b id="rKills"></b></div>
+    <div>BOATS SUNK / КАТЕРА<b id="rBoatsSunk"></b></div>
+    <div>ACCURACY / ТОЧНОСТЬ<b id="rAcc"></b></div>
+    <div>DEATHS / СМЕРТИ<b id="rDeaths"></b></div>
     <div>CARGO / ГРУЗ<b id="rCargo"></b></div>
-    <div>WATER DELIVERED / ВОДА ДОСТАВЛЕНА<b id="rWater"></b></div>
-    <div>BURNED BY ENGINES / СОЖЖЕНО ДВИГАТЕЛЯМИ<b id="rBurned"></b></div>
+    <div class="big">SCORE / ОЧКИ<b id="rScore"></b></div>
+  </div>
+  <div id="stats2">
+    <div>GATE / ВРАТА<b id="rGate"></b></div>
+    <div>WATER DELIVERED / ВОДА<b id="rWater"></b></div>
+    <div>BURNED / СОЖЖЕНО<b id="rBurned"></b></div>
     <div>HEALTH / ЗДОРОВЬЕ<b id="rHealth"></b></div>
-    <div>TARGETS / ЦЕЛИ<b id="rTargets"></b></div>
-    <div>MASTS / МАЧТЫ<b id="rMasts"></b></div>
+    <div>AIR TARGETS / ЦЕЛИ<b id="rTargets"></b></div>
     <div>RELAYS / РЕТРАНСЛЯТОРЫ<b id="rRelays"></b></div>
     <div>MINES / МИНЫ<b id="rMines"></b></div>
     <div>HUNTERS / ОХОТНИКИ<b id="rHunters"></b></div>
     <div>BOATS / КАТЕРА<b id="rBoats"></b></div>
+    <div>MASTS / МАЧТЫ<b id="rMasts"></b></div>
     <div>LETHE HITS / ПОПАДАНИЯ<b id="rHits"></b></div>
-    <div class="big">SCORE / ОЧКИ<b id="rScore"></b></div>
   </div>
-  <button class="primary" id="retry"><span>FLY AGAIN<small>ЗАНОВО</small></span><span>↗</span></button>
+  <div class="rbtns">
+    <button class="primary" id="retry"><span>FLY AGAIN<small>ЗАНОВО</small></span><span>↗</span></button>
+    <button class="ghost" id="menuBtn"><span>MENU<small>МЕНЮ</small></span></button>
+  </div>
 </div>
 
 <div class="screen" id="rotate"><div class="phone"></div><div>ROTATE TO LANDSCAPE<br><span style="opacity:.6">ПОВЕРНИТЕ ТЕЛЕФОН</span></div></div>

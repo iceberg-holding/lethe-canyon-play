@@ -1,4 +1,3 @@
-
 # Audio credits — LETHE / ЛЕТА "Delivery" (variant `claude`)
 
 **All sound in this build is procedural.** There are no audio sample files, no recordings and no third-party
@@ -27,5 +26,3 @@ this prototype.
 | Hazards / UI | two-tone mast-down alarm, geiger clicks (density by dose), air beeps, score chime |
 
 License: same as the rest of this prototype's code (original work).
-
-

@@ -7,8 +7,9 @@ import { clamp, lerp, damp, smoothstep } from './util.js';
 import {
   PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
   ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, zoneLinked, resetLevel,
-  MINES, HUNTERS, BOATS, bedY, underLim,
+  MINES, HUNTERS, BOATS, bedY, underLim, GATE_S, GATE_HOLD, GATE_BEAM,
 } from './world.js';
+import { buildGate, GATE_CORES, CORE_HP } from './gate.js';
 import {
   buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP, BOAT_FEATURES,
 } from './naval.js';
@@ -353,6 +354,7 @@ const hud = {
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
   dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'), tut: $('tut'),
   pR: $('pR'), dampCue: $('dampCue'),
+  act: $('act'), routeBar: $('routeBar'),   // round 16 (null-guarded: an old index.html must not crash the loop)
 };
 for (let i = 0; i < ROCKET_AMMO; i++) hud.pips.appendChild(document.createElement('i'));
 const zoneEls = ZONES.map((z) => {
@@ -363,6 +365,16 @@ const zoneEls = ZONES.map((z) => {
   $('routeBar').appendChild(el);
   return el;
 });
+// round 16: act + gate ticks on the route bar
+const routeTick = (s, cls, title) => {
+  if (!hud.routeBar) return null;
+  const el = document.createElement('div');
+  el.className = cls; el.title = title || '';
+  el.style.left = clamp((s - PAD_A) / ROUTE, 0, 1) * 100 + '%';
+  hud.routeBar.appendChild(el);
+  return el;
+};
+routeTick(GATE_S, 'gt', 'LETHE GATE / ВРАТА ЛЕТЫ');
 const brackets = [0, 1, 2].map(() => {
   const el = document.createElement('div');
   el.className = 'brk';
@@ -390,6 +402,7 @@ function freshState() {
     waterBurned: 0, waterSpilled: 0, burnRate: 0, thinAir: false, steam: 0, burnHinted: false, thinHinted: false,
     dmgTaken: 0, uwCam: 0,
     scan: 0, scanWant: 0, scanCap: 62, scanPhase: 'off', scanBoat: -1, scanDrawn: 0,
+    act: -1, shots: 0, shotHits: 0, coreKills: 0, deaths: 0, gateT: null,   // round 16
   };
 }
 G = freshState();
@@ -580,6 +593,10 @@ function autopilot(dt) {
     else if (bot > 7) ty = Math.min(ty, 2.5);
     else needDive = true;
   }
+  // round 16: at the gate, line up with a live generator (air ones first, then dive for the underwater one)
+  let gT = null;
+  if (GATE.up && GATE_S - G.s < 560) gT = GATE.cores.find((c) => c.alive && !c.under) || GATE.cores.find((c) => c.alive);
+  if (gT) { if (gT.under) needDive = true; else ty = gT.y; }
   let best = G.lat, bestC = 1e9;
   // low (skimming / diving): steer around mines and boat hulls too
   const low = ty < 7 || needDive || G.dive || G.apDiveT > 0 || G.y < 5;
@@ -607,6 +624,7 @@ function autopilot(dt) {
     }
     if (cost < bestC) { bestC = cost; best = lat; }
   }
+  if (gT) best = clamp(gT.lat, -wr * 0.75, wr * 0.75);
   // evade a LETHE lock by diving (the canon escape)
   G.apDiveT = Math.max(0, G.apDiveT - dt);
   if (G.lock.phase === 'laser' && G.air > 12) G.apDiveT = 2.6;
@@ -674,6 +692,12 @@ function updateFlight(dt) {
       latMax += (16 - latMax) * scanK;
       latK += (2.4 - latK) * scanK;
     }
+    // round 16: the gate's field holds the ship in a hover arena ~GATE_HOLD m in front of it until the generators fall
+    GATE.hold = false;
+    if (GATE.up) {
+      const room = GATE_S - GATE_HOLD - G.s;
+      if (room < 260) { aimSpd = Math.min(aimSpd, Math.max(0, room * 0.55)); spdK = Math.max(spdK, 2.2); GATE.hold = room < 90; }
+    }
     G.speed += (aimSpd - G.speed) * damp(spdK, dt);
     G.vLat += (ix * latMax - G.vLat) * damp(latK, dt);
     let vYt;
@@ -693,6 +717,11 @@ function updateFlight(dt) {
   G.dip = 0.13 * env;
   G.s += G.speed * (1 - G.dip) * dt;
   G.lat += G.vLat * dt;
+  if (GATE.up && G.s > GATE_S - 10 && (G.phase === 'flight' || G.phase === 'failed')) {
+    G.s = GATE_S - 10; G.speed = 0;
+    GATE.bumpCd -= dt;
+    if (GATE.bumpCd <= 0 && G.phase === 'flight') { GATE.bumpCd = 1; hitCargo(8, V1.copy(shipPos).addScaledVector(shipFwd, 4).clone()); curtainHit(shipPos, 1); }
+  }
   if (G.phase !== 'takeoff' && G.phase !== 'landed') G.y += G.vY * dt;
 
   if (G.phase === 'flight' || G.phase === 'failed') {
@@ -709,6 +738,7 @@ function updateFlight(dt) {
     }
     const my = maxY(G.s);
     if (G.y > my) { G.y += (my - G.y) * damp(4, dt); G.vY = Math.min(G.vY, 0); }
+    if (Math.abs(G.s - GATE_S) < 8 && G.y > GATE_BEAM - 6) { G.y = GATE_BEAM - 6; G.vY = Math.min(G.vY, 0); }
   }
   collide(dt);
 }
@@ -777,6 +807,7 @@ function fire() {
   const uw = G.underwater;
   b.on = true; b.p.copy(p); b.q.copy(p); b.o.copy(p); b.d.copy(dir); b.life = uw ? UW_BOLT_LIFE : BOLT_LIFE; b.s = G.s; b.lat = G.lat;
   b.under = uw; b.wet = false;
+  G.shots++;
   // muzzle flash: HDR sprite burst + brief light (turquoise + bubbles underwater)
   const mc = uw ? [0.5, 1.9, 1.8] : [2.4, 1.5, 0.6];
   sparks.emit(p.x, p.y, p.z, shipVel.x, shipVel.y, shipVel.z, 0.07, 4.5, 2.5, mc[0], mc[1], mc[2], 1);
@@ -818,7 +849,7 @@ function aimTarget(p, widen = 1) {
   const consider = (o, kind) => {
     V3.copy(o.wp).sub(p);
     const d = V3.length();
-    const naval = kind === 'mine' || kind === 'hunter' || kind === 'boat';
+    const naval = kind === 'mine' || kind === 'hunter' || kind === 'boat' || (kind === 'core' && uw);
     if (naval ? (d < 4 || d > (uw ? UW_RANGE + 6 : 50)) : (d < 15 || d > AIM_RANGE)) return;
     let score;
     if (naval) {
@@ -832,7 +863,7 @@ function aimTarget(p, widen = 1) {
       } else {
         const a = Math.acos(clamp(V3.dot(shipFwd) / d, -1, 1));
         // round 12: submerged, a boat's belly weak point gets a strong assist (±25°): bolts converge on it
-        if (a > (uw && kind === 'boat' ? AIM_UW_BOAT : AIM_CONE * 1.3) * widen) return;
+        if (a > (uw && (kind === 'boat' || kind === 'core') ? AIM_UW_BOAT : AIM_CONE * 1.3) * widen) return;
         score = a * 0.4;   // close naval threats take priority over distant rim targets
       }
       if (score >= bestScore || !viewLOS(p, o.wp, G.s)) return;
@@ -846,7 +877,7 @@ function aimTarget(p, widen = 1) {
       score = ah * 1.4 + Math.abs(ev) * 0.25;
     } else {
       const a = Math.acos(clamp(V3.dot(shipFwd) / d, -1, 1));
-      if (a > AIM_CONE * widen) return;
+      if (a > AIM_CONE * (kind === 'core' ? 1.9 : 1) * widen) return;
       score = a;
     }
     if (score >= bestScore || mastOnLine(p, o.wp) || !viewLOS(p, o.wp, G.s)) return;
@@ -857,7 +888,9 @@ function aimTarget(p, widen = 1) {
     for (const m of MINES) if (m.alive && Math.abs(m.s - G.s) < 90) consider(m, 'mine');
     for (const h of HUNTERS) if (h.alive && h.vis && Math.abs(h.ps - G.s) < 90) consider(h, 'hunter');
     for (const b of BOATS) if (b.alive && Math.abs(b.s - G.s) < 90) consider(b, 'boat');
+    if (Math.abs(GATE_S - G.s) < 90) for (const c of GATE.cores) if (c.alive && c.under) consider(c, 'core');
   } else {
+    if (GATE_S - G.s < 260 && GATE_S - G.s > -20) for (const c of GATE.cores) if (c.alive && !c.under) consider(c, 'core');
     for (const d of DRONES) if (d.alive && Math.abs(d.s - G.s) < 260) consider(d, 'drone');
     for (const b of BEACONS) if (b.alive && Math.abs(b.s - G.s) < 260) consider(b, 'beacon');
     for (const t of TURRETS) if (t.alive && Math.abs(t.s - G.s) < 260) consider(t, 'turret');
@@ -882,6 +915,7 @@ function findRocketTarget(from, dir) {
   let best = null, bc = 0;
   for (const d of DRONES) if (d.alive && Math.abs(d.s - G.s) < 400) { const c = rocketTargetOK(d.wp, from, dir, 0.975, 380); if (c > bc) { bc = c; best = d; } }
   for (const t of TURRETS) if (t.alive && Math.abs(t.s - G.s) < 400) { const c = rocketTargetOK(t.wp, from, dir, 0.975, 380); if (c > bc) { bc = c; best = t; } }
+  if (GATE_S - G.s < 400) for (const t of GATE.cores) if (t.alive && !t.under) { const c = rocketTargetOK(t.wp, from, dir, 0.96, 380); if (c > bc) { bc = c; best = t; } }
   return best && viewLOS(from, best.wp, G.s) ? best : null;
 }
 function fireRocket() {
@@ -936,7 +970,7 @@ function updateRockets(dt) {
     if (r.target && r.target.alive) {
       V4.copy(r.target.wp).sub(r.p).normalize();
       const ang = Math.acos(clamp(V3.dot(V4), -1, 1));
-      const rate = TURRETS.includes(r.target) ? 2.4 : 1.3;   // turrets sit high on the ledges: steeper climb
+      const rate = TURRETS.includes(r.target) || isCore(r.target) ? 2.4 : 1.3;   // turrets sit high on the ledges: steeper climb
       if (ang > 1e-4) V3.lerp(V4, Math.min(1, (rate * dt) / ang)).normalize();
     }
     r.v.copy(V3).multiplyScalar(sp);
@@ -947,6 +981,8 @@ function updateRockets(dt) {
     if (!hit) for (const t of TURRETS) if (t.alive && Math.abs(t.s - r.s) < 50 && segSphere(r.q, r.p, t.wp, 3)) { hit = 'turret '; break; }
     if (!hit) for (const b of BEACONS) if (b.alive && Math.abs(b.s - r.s) < 50 && segSphere(r.q, r.p, b.wp, 2.4)) { hit = true; break; }
     if (!hit) for (const m of MASTS) if (m.alive && Math.abs(m.s - r.s) < 50 && m.pts.some((pt) => segSphere(r.q, r.p, pt, 2.1))) { hit = true; break; }
+    if (!hit && Math.abs(GATE_S - r.s) < 60) for (const c of GATE.cores) if (c.alive && !c.under && segSphere(r.q, r.p, c.wp, 3.4)) { hit = 'core '; hitCore(c, 8, r.p); break; }
+    if (!hit && GATE.up && r.age > 0.08 && r.s > GATE_S - 1) { hit = 'world '; curtainHit(r.p, 1); }
     if (!hit && r.p.y < BOAT_TOP + 0.5) for (const bt of BOATS) if (bt.alive && Math.abs(bt.s - r.s) < 30 && inBoat(bt, r.p, 0.6)) { hit = 'boat '; break; }
     if (!hit && r.age > 0.08) {
       // terrain / water
@@ -1053,18 +1089,20 @@ function updateBolts(dt) {
     let dead = b.life <= 0;
     if (b.under) {
       // underwater: mines, hunters, boat bellies; dies at the surface, the banks and the bed
-      if (!dead) dead = navalBoltHit(b, true);
+      if (!dead && Math.abs(GATE_S - b.s) < 40) for (const c of GATE.cores) if (c.alive && c.under && segSphere(b.q, b.p, c.wp, 2.9)) { hitCore(c, 1, b.p); dead = true; break; }
+      if (!dead) { dead = navalBoltHit(b, true); if (dead) G.shotHits++; }
+      if (!dead && GATE.up && b.s > GATE_S - 0.5) { dead = true; curtainHit(b.p, 0.4); }
       if (!dead) dead = uwBoltWorld(b);
     } else {
       if (!dead) {
         for (const d of DRONES) {
           if (!d.alive || Math.abs(d.s - b.s) > 40) continue;
-          if (segSphere(b.q, b.p, d.wp, 3.4)) { killTarget('drone', d); dead = true; break; }
+          if (segSphere(b.q, b.p, d.wp, 3.4)) { killTarget('drone', d); dead = true; G.shotHits++; break; }
         }
       }
       if (!dead) for (const t of BEACONS) {
         if (!t.alive || Math.abs(t.s - b.s) > 40) continue;
-        if (segSphere(b.q, b.p, t.wp, 2.4) || segSphere(b.q, b.p, t.wp2, 1.6)) { killTarget('beacon', t); dead = true; break; }
+        if (segSphere(b.q, b.p, t.wp, 2.4) || segSphere(b.q, b.p, t.wp2, 1.6)) { killTarget('beacon', t); dead = true; G.shotHits++; break; }
       }
       if (!dead) for (const m of MASTS) {
         if (!m.alive || Math.abs(m.s - b.s) > 40) continue;
@@ -1072,14 +1110,16 @@ function updateBolts(dt) {
       }
       if (!dead) for (const t of TURRETS) {
         if (!t.alive || Math.abs(t.s - b.s) > 40) continue;
-        if (segSphere(b.q, b.p, t.wp, 2.6)) { killTarget('turret', t); dead = true; break; }
+        if (segSphere(b.q, b.p, t.wp, 2.6)) { killTarget('turret', t); dead = true; G.shotHits++; break; }
       }
-      if (!dead) dead = navalBoltHit(b, false);   // boats: armoured from above (ricochet)
+      if (!dead && Math.abs(GATE_S - b.s) < 60) for (const c of GATE.cores) if (c.alive && !c.under && segSphere(b.q, b.p, c.wp, 2.9)) { hitCore(c, 1, b.p); dead = true; break; }
+      if (!dead && GATE.up && b.s > GATE_S - 0.5) { dead = true; curtainHit(b.p, 0.4); }
+      if (!dead) { dead = navalBoltHit(b, false); if (dead) G.shotHits++; }   // boats: armoured from above (ricochet)
       // entering the water: the bolt carries a few metres down — enough for mines just under the surface
       if (!dead && b.p.y < 0 && b.q.y >= 0) {
         V4.lerpVectors(b.q, b.p, b.q.y / Math.max(1e-4, b.q.y - b.p.y));   // water entry point
         V3.copy(V4).addScaledVector(b.d, Math.min(22, 3.2 / Math.max(0.05, -b.d.y)));
-        for (const m of MINES) if (m.alive && Math.abs(m.s - b.s) < 40 && segSphere(V4, V3, m.wp, 2.0)) { killMine(m, 'shot'); break; }
+        for (const m of MINES) if (m.alive && Math.abs(m.s - b.s) < 40 && segSphere(V4, V3, m.wp, 2.0)) { killMine(m, 'shot'); G.shotHits++; break; }
       }
       if (!dead) dead = boltWorldHit(b);
     }
@@ -1419,7 +1459,7 @@ function updateLethe(dt, time) {
       t.cd -= dt;
       if (t.cd <= 0) {
         const wild = t.blind ? 2.2 : 1;
-        t.cd = (6 + Math.random() * 5) * (t.blind ? 2.6 : 1);
+        t.cd = (6 + Math.random() * 5) * (t.blind ? 2.6 : 1) * (G.act >= 2 ? 0.7 : 1);   // round 16: act III escalates
         V4.copy(shipPos).add(V2.set((Math.random() - 0.5) * 28 * wild, 4 + Math.random() * 10 * wild, (Math.random() - 0.5) * 28 * wild));
         if (lineOfSight(t.wp, shipPos, t.s)) fireTurret(t, V4, false);
       }
@@ -2393,6 +2433,143 @@ function hint(kind) {
   if (kind === 'boat' && !G.boatHinted) { G.boatHinted = true; toast('<b>Boats: dive, then fire a torpedo [R]</b><br><i>Нырни и пускай торпеду [R]</i>', 5.5); }
 }
 
+// ------------------------------------------------------------------ round 16: mission structure — acts + the LETHE gate finale
+// The route is split into named acts (a title card on entry, escalating rim-turret pressure in act III) and ends at the
+// LETHE gate: a frame across the canyon with a red energy curtain, held up by three generator cores (two in the air,
+// one underwater). The field holds the ship in a hover arena in front of it; all three cores down = gate falls.
+const gateObj = buildGate(scene, FOG_D_AIR);
+const GATE = { up: true, said: false, hold: false, downT: -1, bumpCd: 0, hitK: 0, cores: [] };
+GATE_CORES.forEach((c, i) => {
+  const m = gateObj.cores[i];
+  GATE.cores.push({ i, s: GATE_S, lat: m.lat, y: m.y, under: m.under, wp: toWorld(GATE_S, m.lat, m.y, new THREE.Vector3()), hp: CORE_HP, alive: true, cd: 1.6 + i * 0.8, gate: true, flash: 0 });
+});
+const isCore = (o) => !!(o && o.gate);
+const CORE_PTS = 600, GATE_PTS = 1500;
+const ACTS = [
+  { s: 200, en: 'ACT I · THE NARROWS', ru: 'АКТ I · ТЕСНИНЫ', sub: 'Drones mark you · rim turrets fire', subRu: 'Дроны метят · турели стреляют' },
+  { s: 2700, en: 'ACT II · DEEP WATER', ru: 'АКТ II · ГЛУБОКАЯ ВОДА', sub: 'Mines, hunters and patrol boats', subRu: 'Мины, охотники и патрульные катера' },
+  { s: 5300, en: "ACT III · LETHE'S REACH", ru: 'АКТ III · ВЛАДЕНИЯ ЛЕТЫ', sub: 'LETHE is awake — everything at once', subRu: 'ЛЕТА проснулась — всё сразу' },
+  { s: GATE_S - 720, en: 'FINALE · THE GATE', ru: 'ФИНАЛ · ВРАТА', sub: 'Break the gate — three generators', subRu: 'Сломай врата — три генератора' },
+];
+ACTS.forEach((a, i) => { if (i) routeTick(a.s, 'at', a.en); });
+function actAt(s) { let a = -1; for (let i = 0; i < ACTS.length; i++) if (s >= ACTS[i].s) a = i; return a; }
+let actT = 0;
+function showAct(i) {
+  const a = ACTS[i];
+  if (!a || !hud.act) return;
+  hud.act.innerHTML = `<b>${a.en}</b><span>${a.ru}</span><i>${a.sub} · ${a.subRu}</i>`;
+  hud.act.classList.remove('on'); void hud.act.offsetWidth; hud.act.classList.add('on');
+  actT = 3.6;
+  audio.actSting?.();
+}
+function resetGate() {
+  GATE.up = true; GATE.said = false; GATE.hold = false; GATE.downT = -1; GATE.bumpCd = 0; GATE.hitK = 0;
+  for (const c of GATE.cores) { c.hp = CORE_HP; c.alive = true; c.cd = 1.6 + c.i * 0.8; c.flash = 0; }
+  for (const m of gateObj.cores) m.g.visible = true;
+  gateObj.curtain.visible = true; gateObj.curtainMat.uniforms.uAlpha.value = 1;
+}
+function curtainHit(p, k) {
+  // ripple on the curtain at the impact (curtain local x = lateral, y = height)
+  const pr = projectToPath(p.x, p.z, GATE_S);
+  gateObj.curtainMat.uniforms.uHit.value.set(pr.lat, p.y - gateObj.curtain.position.y, 1);
+  GATE.hitK = Math.max(GATE.hitK, k);
+  sparks.emit(p.x, p.y, p.z, 0, 0, 0, 0.15, 4, 3, 2.4, 0.45, 0.2, 1);
+}
+function hitCore(c, dmg, p) {
+  if (!c.alive) return;
+  c.hp -= dmg; c.flash = 1;
+  G.shotHits += dmg >= 4 ? 0 : 1;
+  sparkBurst(p || c.wp, 10, c.under ? [0.6, 1.6, 1.6] : [2.4, 0.9, 0.4]);
+  audio.hitTick();
+  hitMarker();
+  if (c.hp > 0) return;
+  c.alive = false; c.hp = 0;
+  G.coreKills++;
+  G.score += CORE_PTS;
+  gateObj.cores[c.i].g.visible = false;
+  if (c.under) underwaterBlast(c.wp, 1.4); else explode(c.wp, 1.8);
+  lightFlash(c.wp, 400, 0.4, 1, 0.4, 0.2);
+  G.shake = Math.min(1.4, G.shake + 0.6);
+  const left = GATE.cores.filter((x) => x.alive).length;
+  popScore(`+${CORE_PTS} GENERATOR / ГЕНЕРАТОР`);
+  if (left > 0) {
+    showMsg(`GENERATOR DOWN — ${left} LEFT`, `ГЕНЕРАТОР УНИЧТОЖЕН — ОСТАЛОСЬ ${left}`, 2, '#ffb070');
+    const uw = GATE.cores.find((x) => x.alive && x.under);
+    if (uw && left === 1) toast('<b>Last generator is underwater — DIVE and shoot it.</b><br><i>Последний генератор под водой — НЫРЯЙ и стреляй.</i>', 5, true);
+  } else gateDown();
+}
+function gateDown() {
+  GATE.up = false; GATE.downT = 0; GATE.hold = false;
+  G.gateT = G.t;
+  G.score += GATE_PTS;
+  showMsg('GATE DOWN — FLY TO SETTLEMENT B', 'ВРАТА ПАЛИ — ЛЕТИ В ПОСЁЛОК Б', 3, '#9ff2d8');
+  popScore(`+${GATE_PTS} LETHE GATE / ВРАТА`);
+  toast('LETHE: <em>“…no. NO.”</em> &nbsp;/&nbsp; ЛЕТА: <em>«…нет. НЕТ.»</em>', 3.5, true);
+  audio.collapse();
+}
+function updateGate(dt, time) {
+  const U = gateObj.curtainMat.uniforms;
+  U.uTime.value = time;
+  GATE.hitK = Math.max(0, GATE.hitK - dt * 2.5);
+  U.uHit.value.z = GATE.hitK;
+  if (GATE.downT >= 0) {
+    GATE.downT += dt;
+    U.uAlpha.value = Math.max(0, 1 - GATE.downT / 1.4) * (Math.random() < 0.3 ? 0.3 : 1);
+    if (GATE.downT > 1.4) gateObj.curtain.visible = false;
+    // chain of blasts along the beam
+    const n = Math.floor(GATE.downT / 0.22);
+    if (n > (GATE.booms || 0) && n <= 7) {
+      GATE.booms = n;
+      const lat = (n / 7 * 2 - 1) * gateObj.WL * 0.9;
+      explode(toWorld(GATE_S, lat, GATE_BEAM - 2, V4).clone(), 1.2);
+    }
+  } else GATE.booms = 0;
+  if (G.phase === 'flight' || G.phase === 'takeoff') { const a = actAt(G.s); if (a > G.act) { G.act = a; showAct(a); } }
+  const near = GATE_S - G.s < 1400 && GATE_S - G.s > -330;
+  if (!near) return;
+  // generator glow: a pulsing core sphere + HDR glow sprite (hidden across the water line from the other side)
+  for (const c of GATE.cores) {
+    if (!c.alive) continue;
+    c.flash = Math.max(0, c.flash - dt * 6);
+    const m = gateObj.cores[c.i];
+    const pulse = 1 + 0.08 * Math.sin(time * 6 + c.i * 2) + c.flash * 0.25;
+    m.glow.scale.setScalar(pulse);
+    if (c.under === camUnder) {
+      const dc = c.wp.distanceTo(camera.position), minS = (14 * dc) / pxScale;
+      glows.add(c.wp.x, c.wp.y, c.wp.z, c.under ? 1.2 : 2.4, c.under ? 0.5 : 0.35, 0.15, 0.9 + c.flash, Math.max(9, minS * 2));
+    }
+  }
+  const lampOn = (time * 2) % 1 < 0.5;
+  gateObj.lamps.visible = GATE.up ? lampOn : false;
+  if (G.phase !== 'flight') return;
+  const dist = GATE_S - G.s;
+  if (GATE.up && !GATE.said && dist < 640) {
+    GATE.said = true;
+    showMsg('LETHE GATE — DESTROY 3 GENERATORS', 'ВРАТА ЛЕТЫ — УНИЧТОЖЬ 3 ГЕНЕРАТОРА', 3, '#ff8a5a');
+    toast('<b>The gate field stops you. Shoot its generators — one is underwater (dive).</b><br><i>Поле врат не пустит. Сбей генераторы — один под водой (ныряй).</i>', 6, true);
+  }
+  if (!GATE.up || dist > 480 || dist < -20) return;
+  // generator fire: air cores shoot red bolts while the ship is above water, the underwater core shoots cyan ones below;
+  // the fewer cores are left, the faster the rest fire (escalation inside the fight)
+  const left = GATE.cores.filter((x) => x.alive).length;
+  for (const c of GATE.cores) {
+    if (!c.alive) continue;
+    const can = c.under ? G.underwater && c.wp.distanceTo(shipPos) < 115 : !G.underwater;
+    if (!can) continue;
+    c.cd -= dt;
+    if (c.cd > 0) continue;
+    c.cd = 1.0 + 0.55 * left + Math.random() * 0.6;
+    if (!c.under && !lineOfSight(shipPos, c.wp, G.s)) continue;
+    const sp = EB_SPEED * (c.under ? 0.55 : 0.85);
+    V3.copy(shipPos).sub(c.wp).normalize().multiplyScalar(3.4).add(c.wp);
+    const b = enemyBolt(V3, leadTarget(V3, V4, sp, c.under), GATE_S, sp, c.under ? EB_CYAN : EB_RED, 7, 3.4, 'gate', c.under, 4);
+    if (!b) continue;
+    threat(c, c.wp);
+    sparks.emit(V3.x, V3.y, V3.z, 0, 0, 0, 0.12, 6, 3, c.under ? 0.4 : 2.4, c.under ? 1.6 : 0.4, c.under ? 1.7 : 0.2, 1);
+    audio.turretShot(panOf(c.wp) * 0.8);
+  }
+}
+
 // ------------------------------------------------------------------ off-screen threat indicator
 // Anything that locks / fires / attacks registers here; an edge chevron points to it while it is off-screen or hidden
 // (around a bend, or across the water surface), fading 1.5 s after the threat ends.
@@ -2641,8 +2818,9 @@ const nozW = new THREE.Vector3();
 function updateShipVisual(dt, time) {
   frame(G.s, SF);
   toWorld(G.s, G.lat, G.y, shipPos);
-  const yawT = -Math.atan2(G.vLat, Math.max(G.speed, 10)) * 0.8;
-  const pitchT = Math.atan2(G.vY, Math.max(G.speed, 12)) * 0.8;
+  const hov = GATE.hold ? 30 : 0;   // round 16: hovering at the gate — strafing must not swing the nose (aim stays on the gate)
+  const yawT = -Math.atan2(G.vLat, Math.max(G.speed, 10, hov)) * 0.8;
+  const pitchT = Math.atan2(G.vY, Math.max(G.speed, 12, hov)) * 0.8;
   const rollT = clamp(-G.vLat * 0.028, -0.75, 0.75);
   G.yaw += (yawT - G.yaw) * damp(8, dt);
   G.pitch += (pitchT - G.pitch) * damp(8, dt);
@@ -2946,8 +3124,8 @@ function viewLOS(a, b, s0) {
 }
 const TGT_N = 10, TGT_RANGE = 260, TGT_RANGE_UW = 95;
 const TGT_LABEL = { turret: 'TURRET / ТУРЕЛЬ', drone: 'DRONE / ДРОН', beacon: 'RELAY / РЕТРАНСЛЯТОР', mine: 'MINE / МИНА', hunter: 'HUNTER / ОХОТНИК',
-  boat: 'BOAT / КАТЕР · ARMORED', weak: 'WEAK POINT / УЯЗВИМОЕ МЕСТО' };
-const TGT_R = { turret: 2.6, drone: 2.4, beacon: 2.2, mine: 1.8, hunter: 1.6, boat: 5, weak: 2.2 };
+  boat: 'BOAT / КАТЕР · ARMORED', weak: 'WEAK POINT / УЯЗВИМОЕ МЕСТО', core: 'GENERATOR / ГЕНЕРАТОР' };
+const TGT_R = { turret: 2.6, drone: 2.4, beacon: 2.2, mine: 1.8, hunter: 1.6, boat: 5, weak: 2.2, core: 3 };
 const tgtEls = [], mtagEls = [];
 for (let i = 0; i < TGT_N; i++) {
   const el = document.createElement('div'); el.className = 'tgt'; el.innerHTML = '<span></span><b class="hpb"><i></i></b>';
@@ -2965,7 +3143,7 @@ function updateMarkers(rdt) {
     const cp = camera.position;
     const range = camUnder ? TGT_RANGE_UW : TGT_RANGE;
     const add = (o, kind, p = o.wp, s = o.s) => {
-      const reach = kind === 'boat' ? 400 : kind === 'weak' ? TORP_RANGE + 10 : range;   // round 12: boats stay bracketed through the murk out to torpedo range
+      const reach = kind === 'boat' ? 400 : kind === 'core' ? 330 : kind === 'weak' ? TORP_RANGE + 10 : range;   // round 12: boats stay bracketed through the murk out to torpedo range
       if (Math.abs(s - G.s) > reach + 30) return;
       const d = p.distanceTo(shipPos);
       if (d > reach || p.distanceTo(cp) < 8) return;
@@ -2976,7 +3154,9 @@ function updateMarkers(rdt) {
       for (const m of MINES) if (m.alive) add(m, 'mine');
       for (const h of HUNTERS) if (h.alive && h.vis) add(h, 'hunter', h.wp, h.ps);
       for (const b of BOATS) if (b.alive) add(b, 'weak');
+      for (const c of GATE.cores) if (c.alive && c.under) add(c, 'core');
     } else {
+      for (const c of GATE.cores) if (c.alive && !c.under) add(c, 'core');
       for (const d of DRONES) if (d.alive && !d.spotting) add(d, 'drone');   // spotting drones carry the red LETHE bracket
       for (const b of BEACONS) if (b.alive) add(b, 'beacon');
       for (const t of TURRETS) if (t.alive) add(t, 'turret');
@@ -3010,16 +3190,16 @@ function updateMarkers(rdt) {
         }
       }
       const label = c.kind === 'boat' ? `КАТЕР / BOAT · ${Math.round(c.d)} m${seen && seen.o === c.o && seen.t > 0 ? ' · ARMORED' : ''}`
-        : torp ? `TORPEDO LOCK / ТОРПЕДА · ${Math.round(c.d)} m` : c.kind === 'weak' || (seen && seen.o === c.o && seen.t > 0) ? TGT_LABEL[c.kind] : '';
+        : torp ? `TORPEDO LOCK / ТОРПЕДА · ${Math.round(c.d)} m` : c.kind === 'weak' || c.kind === 'core' || (seen && seen.o === c.o && seen.t > 0) ? TGT_LABEL[c.kind] : '';
       if (label !== m.label) { m.label = label; m.span.textContent = label; }
       const aim = c.o === aimObj;
       if (aim !== m.aim) { m.aim = aim; m.el.classList.toggle('aim', aim); }
       if (torp !== m.torp) { m.torp = torp; m.el.classList.toggle('torp', torp); }
       // round 12: boat hull HP (a patrol boat shows the half a torpedo takes)
-      const hpV = c.kind === 'weak' || c.kind === 'boat' ? c.o.hp / BOAT_HP : -1;
+      const hpV = c.kind === 'core' ? c.o.hp / CORE_HP : c.kind === 'weak' || c.kind === 'boat' ? c.o.hp / BOAT_HP : -1;
       if (hpV !== m.hpV) { m.hpV = hpV; m.el.classList.toggle('hp', hpV >= 0); if (hpV >= 0) m.hp.style.transform = `scaleX(${hpV})`; }
       if (c.kind !== m.kind) {
-        m.el.classList.toggle('weak', c.kind === 'weak');
+        m.el.classList.toggle('weak', c.kind === 'weak' || c.kind === 'core');
         m.el.classList.toggle('uwk', c.kind === 'mine' || c.kind === 'hunter');
         m.el.classList.toggle('boat', c.kind === 'boat');
         m.kind = c.kind;
@@ -3159,29 +3339,43 @@ function showResult() {
   const ok = G.outcome === 'delivered';
   const timeBonus = ok ? Math.max(0, Math.round((200 - G.t) * 15)) : 0;
   G.finalScore = Math.max(0, G.score + (ok ? Math.round(G.cargo) * 20 + Math.round(G.health) * 10 + timeBonus : 0));
-  $('rTitle').textContent = ok ? 'Water delivered.' : 'Mission failed.';
-  $('rTitle').className = ok ? '' : 'bad';
-  $('rSub').textContent = ok ? 'ДОСТАВЛЕНО · SETTLEMENT B HAS WATER TONIGHT' : 'МИССИЯ ПРОВАЛЕНА · ' + G.reason;
+  const set = (id, v) => { const e = $(id); if (e) e.textContent = v; };   // null-guarded: never crash on an older index.html
+  set('rTitle', ok ? 'MISSION COMPLETE' : 'MISSION FAILED');
+  const rt = $('rTitle'); if (rt) rt.className = ok ? '' : 'bad';
+  set('rSub', ok ? 'МИССИЯ ВЫПОЛНЕНА · Gate broken — settlement B has water tonight' : 'МИССИЯ ПРОВАЛЕНА · ' + G.reason);
   const mm = Math.floor(G.t / 60), ss = (G.t % 60).toFixed(1).padStart(4, '0');
-  $('rTime').textContent = `${mm}:${ss}`;
-  $('rCargo').textContent = Math.round(G.cargo) + '%';
+  set('rTime', `${mm}:${ss}`);
   const litres = (pct) => Math.round(pct / 100 * TANK_L / 10) * 10;
   const fmtL = (l) => String(l).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009') + '\u00a0л';
   const deliv = ok ? G.cargo : 0;
-  $('rWater').textContent = `${fmtL(litres(deliv))} (${Math.round(deliv)}%)`;
-  $('rBurned').textContent = `${fmtL(litres(G.waterBurned))} (${G.waterBurned.toFixed(1)}%)`;
-  $('rHealth').textContent = Math.round(Math.max(0, G.health)) + '%';
-  $('rTargets').textContent = `${G.kills} / ${N_DRONE_REAL + BEACONS.length + TURRETS.length}`;
-  $('rMasts').textContent = `${G.mastsBroken}`;
-  $('rRelays').textContent = `${G.relayKills} / ${BEACONS.length}`;
-  $('rMines').textContent = `${G.mineKills} / ${N_MINE_REAL}`;
-  $('rHunters').textContent = `${G.hunterKills} / ${N_HUNTER_REAL}`;
-  $('rBoats').textContent = `${G.boatKills} / ${N_BOAT_REAL}`;
-  $('rHits').textContent = `${G.turretHits} / ${G.turretShotsFired}`;
-  $('rScore').textContent = G.finalScore + (ok ? ` (+${timeBonus})` : '');
-  $('result').classList.remove('hide');
+  // round 16 headline stats
+  G.killsTotal = G.kills + G.mineKills + G.hunterKills + G.boatKills + G.coreKills;
+  set('rKills', `${G.killsTotal}`);
+  set('rBoatsSunk', `${G.boatKills} / ${N_BOAT_REAL}`);
+  G.accuracy = G.shots ? Math.min(100, Math.round(G.shotHits / G.shots * 100)) : 0;
+  set('rAcc', G.shots ? `${G.accuracy}% (${G.shotHits}/${G.shots})` : '—');
+  set('rDeaths', `${G.deaths}`);
+  set('rGate', G.gateT != null ? 'BROKEN / СЛОМАНЫ' : `${G.coreKills} / ${GATE.cores.length}`);
+  set('rCargo', Math.round(G.cargo) + '%');
+  set('rWater', `${fmtL(litres(deliv))} (${Math.round(deliv)}%)`);
+  set('rBurned', `${fmtL(litres(G.waterBurned))} (${G.waterBurned.toFixed(1)}%)`);
+  set('rHealth', Math.round(Math.max(0, G.health)) + '%');
+  set('rTargets', `${G.kills} / ${N_DRONE_REAL + BEACONS.length + TURRETS.length}`);
+  set('rMasts', `${G.mastsBroken}`);
+  set('rRelays', `${G.relayKills} / ${BEACONS.length}`);
+  set('rMines', `${G.mineKills} / ${N_MINE_REAL}`);
+  set('rHunters', `${G.hunterKills} / ${N_HUNTER_REAL}`);
+  set('rBoats', `${G.boatKills} / ${N_BOAT_REAL}`);
+  set('rHits', `${G.turretHits} / ${G.turretShotsFired}`);
+  set('rScore', G.finalScore + (ok ? ` (+${timeBonus})` : ''));
+  $('result')?.classList.remove('hide');
   document.body.classList.remove('playing');
   input.active = false;
+}
+function toMenu() {
+  reset();
+  $('result')?.classList.add('hide');
+  $('start')?.classList.remove('hide');
 }
 
 function reset() {
@@ -3209,6 +3403,8 @@ function reset() {
   camInit = false;
   hud.toast.classList.remove('on');
   for (const m of MASTS) delete m.tagT;
+  resetGate();
+  if (hud.act) hud.act.classList.remove('on');
 }
 
 function startGame() {
@@ -3232,6 +3428,7 @@ $('start').addEventListener('click', () => {
   startGame();
 });
 $('retry').addEventListener('click', (e) => { e.stopPropagation(); reset(); startGame(); });
+$('menuBtn')?.addEventListener('click', (e) => { e.stopPropagation(); toMenu(); });
 function syncSnd(muted) {
   hud.snd.classList.toggle('muted', muted);
   hud.snd.querySelector('.x').style.display = muted ? '' : 'none';
@@ -3451,6 +3648,7 @@ function loop() {
     for (const m of MASTS) if (m.alive && m.s - G.s > 0 && m.s - G.s < 300) autoFire = false;
     // underwater: shoot whatever the assist locks (mines, hunters, boat bellies)
     if (G.underwater && aimObj) autoFire = true;
+    if (isCore(aimObj)) autoFire = true;
     input.fire = autoFire;
   }
   updateTorpedoLock(realDt);
@@ -3467,6 +3665,7 @@ function loop() {
   updateLethe(dt, time);
   updateNaval(dt, time);
   updateHazards(dt);
+  updateGate(dt, time);
   if (G.phase === 'landed' && G.phaseT > 1.6) showResult();
   if (G.phase === 'failed' && G.phaseT > 2.6) showResult();
   updateCamera(dt, time);
@@ -3503,6 +3702,7 @@ function loop() {
   for (const c of chunks) c.visible = c.userData.sB > s0 && c.userData.sA < s1;
   for (const w of waters) w.visible = w.userData.sB > s0 && w.userData.sA < s1;
   for (const z of ZONES) if (z.mesh && z.shielded) z.mesh.visible = z.s1 > s0 && z.s0 < s1;
+  gateObj.group.visible = GATE_S > s0 && GATE_S < s1;
 
   for (const m of FALLS) m.material.uniforms.uTime.value = time;
   waterMat.uniforms.uTime.value = time;
@@ -3545,7 +3745,9 @@ window.__lethe = {
     burnTag: hud.rowCargo.classList.contains('burn'), mastsBroken: G.mastsBroken, kills: G.kills,
     rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol, engineSound: audio.engine,
     aim: aimObj ? (TURRETS.includes(aimObj) ? 'turret' : DRONES.includes(aimObj) ? 'drone' : MINES.includes(aimObj) ? 'mine' : HUNTERS.includes(aimObj) ? 'hunter'
-      : BOATS.includes(aimObj) ? 'boat' : 'relay') : null, turretKills: G.turretKills,
+      : BOATS.includes(aimObj) ? 'boat' : isCore(aimObj) ? 'core' : 'relay') : null, turretKills: G.turretKills,
+    gate: { up: GATE.up, hold: GATE.hold, s: GATE_S, cores: GATE.cores.map((c) => (c.alive ? c.hp : 0)), coreKills: G.coreKills }, act: G.act,
+    mission: { shots: G.shots, shotHits: G.shotHits, deaths: G.deaths, killsTotal: G.killsTotal ?? null, accuracy: G.accuracy ?? null },
     relaysAlive: BEACONS.filter((b) => b.alive).length, relaysDown: BEACONS.filter((b) => !b.alive).length, relayKills: G.relayKills,
     noRelay: G.noRelay, zone: zoneAt(G.s)?.idx ?? -1, sectorLinked: zoneLinked(zoneAt(G.s)), lockRelay: G.lock.phase !== 'none' ? !!G.lock.relay : null,
     lockTurret: G.lock.turret ? TURRETS.indexOf(G.lock.turret) : -1, lockLog: G.lockLog.slice(-8), dataBeam: G.beamSegs, beamTurret: G.beamTurret, markPings: G.markPings,
@@ -3583,6 +3785,8 @@ window.__lethe = {
   warp: (s) => { G.s = s; camInit = false; },
   input,
   debug: {
+    hitCore: (i, d = 99) => hitCore(GATE.cores[i], d),
+    gateWarp: (back = 300) => { G.s = GATE_S - back; G.y = 14; G.lat = 0; G.speed = 60; },
     breakMast: (i) => breakMast(MASTS[i]),
     setCargo: (v) => { G.cargo = clamp(v, 0, 100); disp.cargo = disp.gc = G.cargo; },
     zones: () => ZONES.map((z) => ({ i: z.idx, s0: +z.s0.toFixed(0), s1: +z.s1.toFixed(0), shielded: z.shielded, mast: MASTS.findIndex((m) => m.zone === z) })),
