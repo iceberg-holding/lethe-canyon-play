@@ -2,7 +2,7 @@
 //   voices -> [panner] -> world bus -> underwater low-pass -> pre-master
 //            \-> reverb send (generated canyon impulse) + slap echo (delay feedback) -/
 //   pre-master -> bus compressor -> volume -> limiter -> destination
-const LS_KEY = 'lethe.audio', LS_ENGINE = 'lethe.engine';
+const LS_KEY = 'lethe.audio', LS_ENGINE = 'lethe.engine', LS_MUSIC = 'lethe.music';
 export const ENGINES = [
   { id: 'whisper', en: 'Jet whisper', ru: 'Шёпот' },
   { id: 'turbine', en: 'Turbine', ru: 'Турбина' },
@@ -25,6 +25,10 @@ export class Audio {
     this.listeners = [];
     // round 11 tutorial slow-mo: 0..1 depth -> pitch drop on every voice + a master low-pass
     this.slowK = 0; this.pitch = 1; this.loops = [];
+    // round 19: procedural music (level theme + danger layers); on by default, persisted
+    this.musicOn = true;
+    try { if (localStorage.getItem(LS_MUSIC) === '0') this.musicOn = false; } catch (e) { /* ignore */ }
+    this.mI = 0; this.mStep = 0; this.mNext = 0;
   }
   init() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
@@ -127,6 +131,14 @@ export class Audio {
     this.hum2 = this.osc('sine', 261.5, this.humG);
     this.humG.connect(this.world);
     this.lastProx = 0;
+    // ---- round 19 music bus: notes -> mBus (level / on-off) -> mLP (muffled underwater / slow-mo) -> pre-master bus.
+    // It sits under the master volume, so M (mute) and the volume control apply to it like everything else.
+    this.mBus = c.createGain(); this.mBus.gain.value = 0;
+    this.mLP = c.createBiquadFilter(); this.mLP.type = 'lowpass'; this.mLP.frequency.value = 16000; this.mLP.Q.value = 0.4;
+    this.mBus.connect(this.mLP); this.mLP.connect(this.bus);
+    const mv = c.createGain(); mv.gain.value = 0.12; this.mLP.connect(mv); mv.connect(this.verbIn);
+    this.mPadLP = c.createBiquadFilter(); this.mPadLP.type = 'lowpass'; this.mPadLP.frequency.value = 900; this.mPadLP.Q.value = 0.7;
+    this.mPadLP.connect(this.mBus);
   }
   osc(type, f, dest) {
     const o = this.ctx.createOscillator(); o.type = type; o.frequency.value = f;
@@ -402,6 +414,94 @@ export class Audio {
   boatApproach(pan = 0) { this.tone('sawtooth', 72, 65, 0.045, 1.3, 0, {pan, attack:0.15, verb:0.25}); this.tone('triangle', 180, 155, 0.08, 0.7, 0.15, {pan, attack:0.08, verb:0.4}); }
   boatAlarm(pan = 0) { if (this.ctx) for (let i = 0; i < 2; i++) this.tone('square', 540, 520, 0.035, 0.12, i * 0.16, { pan, attack: 0.004 }); }
   // round 11 tutorial slow-mo depth 0..1: everything drops up to ~a fourth and loses its top end (the sting is exempt)
+  // ---------------------------------------------------------------- round 19: music
+  // A 100 BPM D-minor loop (Dm - Bb - F - C). Calm = a slow pad + a bell theme; as the intensity rises (0..1, from
+  // the game: marks, locks, boat scans, the gate, damage) bass, hats, kick, snare and a 16th arpeggio fade in, and
+  // the theme steps back. Scheduled with a short look-ahead from the frame loop, so a hidden tab simply stops.
+  setMusic(on) {
+    this.musicOn = !!on;
+    try { localStorage.setItem(LS_MUSIC, on ? '1' : '0'); } catch (e) { /* ignore */ }
+    for (const f of this.listeners) f(this.muted, this.vol);
+  }
+  mNote(type, midi, t, a, d, peak, dest, o = {}) {
+    const c = this.ctx, osc = c.createOscillator(), g = c.createGain();
+    osc.type = type; osc.frequency.value = 440 * Math.pow(2, (midi - 69) / 12);
+    if (o.detune) osc.detune.value = o.detune;
+    if (o.glide) osc.frequency.exponentialRampToValueAtTime(osc.frequency.value * o.glide, t + a + d);
+    let src = osc;
+    if (o.lp) { const f = c.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = o.q || 1; f.frequency.setValueAtTime(o.lp, t); if (o.lpEnd) f.frequency.exponentialRampToValueAtTime(o.lpEnd, t + a + d); osc.connect(f); src = f; }
+    src.connect(g); g.connect(dest || this.mBus);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + a);
+    if (o.hold) g.gain.setValueAtTime(Math.max(peak, 0.0002), t + a + o.hold);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + a + (o.hold || 0) + d);
+    osc.start(t); osc.stop(t + a + (o.hold || 0) + d + 0.05);
+  }
+  mNoise(type, f, q, t, d, peak, fEnd) {
+    const c = this.ctx, src = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain();
+    src.buffer = this.noise; fl.type = type; fl.frequency.setValueAtTime(f, t); fl.Q.value = q;
+    if (fEnd) fl.frequency.exponentialRampToValueAtTime(fEnd, t + d);
+    src.connect(fl); fl.connect(g); g.connect(this.mBus);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    src.start(t, Math.random() * 1.5); src.stop(t + d + 0.05);
+  }
+  // mode: 'menu' (quiet theme), 'play', 'off' (fade out); target intensity 0..1; under = camera underwater
+  music(target, mode, under, dt) {
+    if (!this.ctx) return;
+    const c = this.ctx, now = c.currentTime;
+    const on = this.musicOn && mode !== 'off';
+    const lvl = !on ? 0 : (mode === 'menu' ? 0.32 : 0.5) * (1 - 0.55 * this.slowK);
+    this.set(this.mBus.gain, lvl, on ? 0.6 : 0.4);
+    this.set(this.mLP.frequency, under ? 650 : 16000 * Math.pow(0.08, this.slowK), 0.15);
+    // intensity follows fast up, slowly down (a fight keeps the drums going a few seconds after it ends)
+    const k = target > this.mI ? 1.6 : 0.22;
+    this.mI += (target - this.mI) * (1 - Math.exp(-k * dt));
+    if (!on || this.mBus.gain.value < 0.002 && lvl === 0) { this.mNext = 0; return; }
+    const STEP = 60 / 100 / 4;
+    if (this.mNext < now - 0.25) { this.mNext = now + 0.06; }   // first start or after a stall: re-sync
+    while (this.mNext < now + 0.18) { this.mStepAt(this.mStep, this.mNext, STEP); this.mNext += STEP; this.mStep++; }
+  }
+  mStepAt(st, t, STEP) {
+    const I = this.mI, sm = (a, b) => { const x = Math.min(1, Math.max(0, (I - a) / (b - a))); return x * x * (3 - 2 * x); };
+    const bar = Math.floor(st / 16) % 4, s16 = st % 16;
+    const CH = [[50, 53, 57], [46, 50, 53], [41, 45, 48], [48, 52, 55]], ch = CH[bar];
+    // pad: one chord per bar, filter opens with the intensity
+    if (s16 === 0) {
+      this.set(this.mPadLP.frequency, 700 + 2600 * I, 0.5);
+      for (const n of ch) for (const dt of [-7, 7]) this.mNote('sawtooth', n + 12, t, 0.7, 1.1, 0.016, this.mPadLP, { detune: dt, hold: STEP * 16 - 1.2 });
+    }
+    // bell theme (calm): 4-bar motif, fades as the action rises
+    const m = 1 - sm(0.35, 0.7);
+    const TH = { 0: 69, 6: 67, 8: 65, 12: 64, 16: 62, 24: 65, 28: 64, 32: 69, 38: 72, 40: 70, 44: 69, 48: 67, 56: 65, 60: 62 };
+    const th = TH[st % 64];
+    if (th && m > 0.03) { this.mNote('triangle', th, t, 0.004, 1.3, 0.05 * m); this.mNote('sine', th + 12, t, 0.004, 0.7, 0.014 * m); }
+    // bass: quarters, then eighths
+    const b = sm(0.18, 0.42);
+    if (b > 0.02 && (s16 % 4 === 0 || (I > 0.55 && s16 % 2 === 0))) this.mNote('sawtooth', ch[0] - 12, t, 0.005, STEP * 1.7, 0.085 * b, null, { lp: 900, lpEnd: 160, q: 4 });
+    // hats
+    const h = sm(0.32, 0.55);
+    if (h > 0.02 && (s16 % 2 === 0 || I > 0.85)) this.mNoise('highpass', 7200, 0.8, t, s16 % 4 === 2 ? 0.06 : 0.035, (s16 % 4 === 2 ? 0.05 : 0.028) * h);
+    // kick
+    const kk = sm(0.42, 0.62);
+    if (kk > 0.02 && (s16 === 0 || s16 === 8 || (I > 0.8 && (s16 === 6 || s16 === 11)))) this.mNote('sine', 52, t, 0.002, 0.22, 0.42 * kk, null, { glide: 0.35 });
+    // snare
+    const sn = sm(0.58, 0.78);
+    if (sn > 0.02 && (s16 === 4 || s16 === 12)) { this.mNoise('bandpass', 1900, 0.9, t, 0.16, 0.16 * sn, 900); this.mNote('triangle', 55, t, 0.002, 0.09, 0.08 * sn, null, { glide: 0.6 }); }
+    // 16th arpeggio (danger)
+    const ar = sm(0.62, 0.9);
+    if (ar > 0.02) { const n = ch[s16 % 3] + 24 + (s16 % 6 >= 3 ? 12 : 0); this.mNote('square', n, t, 0.003, 0.11, 0.02 * ar, null, { lp: 2600 }); }
+    // stabs on the downbeat at full alarm
+    const sb = sm(0.85, 1);
+    if (sb > 0.02 && (s16 === 0 || s16 === 3 || s16 === 6)) for (const n of [ch[0] + 12, ch[2] + 12]) this.mNote('sawtooth', n, t, 0.004, 0.18, 0.03 * sb, null, { lp: 3200, lpEnd: 700 });
+  }
+  // act title card: a soft low swell + bell (UI bus, cuts through the mix)
+  actSting() {
+    if (!this.ctx) return;
+    this.tone('sawtooth', 73.4, 73.4, 0.05, 2.2, 0, { ui: true, raw: true, attack: 0.6 });
+    this.tone('sawtooth', 110, 110, 0.035, 2.2, 0, { ui: true, raw: true, attack: 0.7 });
+    this.tone('triangle', 587, 587, 0.06, 1.6, 0.25, { ui: true, raw: true, verb: 0.5 });
+    this.tone('sine', 880, 880, 0.03, 1.4, 0.55, { ui: true, raw: true, verb: 0.5 });
+  }
   slowmo(k) {
     if (!this.ctx || Math.abs(k - this.slowK) < 1e-3) return;
     this.slowK = k; this.pitch = 1 - 0.3 * k;

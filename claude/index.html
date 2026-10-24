@@ -265,9 +265,10 @@
     display:flex;align-items:center;justify-content:center;color:var(--dim);border:1px solid var(--line);border-radius:12px;background:rgba(20,10,8,.25)}
   #engBtn svg{width:14px;height:14px}
   .eng{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
-  #tipsSel{display:inline-flex;align-items:center;gap:10px;margin-left:8px}
+  #tipsSel,#musSel{display:inline-flex;align-items:center;gap:10px;margin-left:8px}
   .eng .engL{font-size:8.5px;letter-spacing:.26em;color:var(--dim);font-weight:500}
   .eng .engL i{font-style:normal;opacity:.6}
+  @media (max-height:520px){.eng .engL{letter-spacing:.12em}#tipsSel,#musSel{gap:6px;margin-left:4px}}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;pointer-events:auto}
   .seg button{font:inherit;font-size:9.5px;letter-spacing:.12em;color:var(--dim);background:rgba(20,10,8,.3);border:0;border-right:1px solid var(--line);padding:5px 10px 4px;cursor:pointer;text-align:left;line-height:1.25}
   .seg button:last-child{border-right:0}
@@ -452,14 +453,15 @@
       <div class="legend">
         <span><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> steer · climb</span><span><kbd>Shift</kbd> boost</span>
         <span><kbd>Space</kbd> / <kbd>LMB</kbd> fire cannons</span><span><kbd>E</kbd> <kbd>C</kbd> <kbd>Q</kbd> dive / surface</span>
-        <span><kbd>R</kbd> / <kbd>RMB</kbd> rocket</span><span><kbd>M</kbd> mute · <kbd>V</kbd> engine · <kbd>H</kbd> keys</span>
+        <span><kbd>R</kbd> / <kbd>RMB</kbd> rocket</span><span><kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>V</kbd> engine · <kbd>H</kbd> keys</span>
       </div>
       <div class="instr">
         <span class="tonly"><b>Left thumb</b> stick · <b>FIRE</b> / <b>BOOST</b> hold · <b>ROCKET</b> / <b>DIVE</b> tap · <b>TILT</b> gyro · ⚙ engine<br></span>
         <span class="tg">Amber brackets</span> = targets. Drones mark you, <b>relays</b> pass it to rim turrets — down a relay, the sector goes blind. <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water hides you — mines and hunters wait below.
       </div>
       <div class="eng" id="engSel"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div>
-        <span id="tipsSel"><span class="engL">TIPS <i>/ ПОДСКАЗКИ</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span></div>
+        <span id="tipsSel"><span class="engL">TIPS <i>/ ПОДСКАЗКИ</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span>
+        <span id="musSel"><span class="engL">MUSIC <i>/ МУЗЫКА</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span></div>
       <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive. A boat's scan beam damps your engines — dive, then kill it from below.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй. Луч катера глушит двигатели — нырни и бей снизу.</i></div>
     </div>
   </div>

@@ -529,6 +529,7 @@ function shieldImpact(p) {
 function damage(amount, p, kind) {
   if (G.phase === 'result' || G.phase === 'failed') return 0;
   if (G.invuln > 0) return 0;   // round 18: brief respawn protection
+  G.hurtT = G.t;   // round 19: music intensity
   G.dmgTaken += amount;
   G.shieldCd = SHIELD_DELAY;
   let rest = amount;
@@ -2639,6 +2640,27 @@ function respawn() {
   if (i) cpTicks[i]?.classList.add('on');
 }
 
+// ------------------------------------------------------------------ round 19: music intensity 0..1
+// Baseline rises per act; danger pushes it up: a turret lock / laser, the drone mark, a boat scan, a boat or hunter
+// close by, incoming fire (off-screen threats), recent damage, and the gate fight.
+function musicIntensity() {
+  if (G.phase === 'start') return 0;
+  if (G.phase === 'result') return G.outcome === 'delivered' ? 0.1 : 0;
+  if (G.phase === 'landed') return 0.05;
+  if (G.phase === 'failed') return 0.15;
+  let I = 0.1 + 0.07 * Math.max(0, G.act);
+  const L = G.lock.phase;
+  if (L === 'laser' || L === 'volley') I = Math.max(I, 1); else if (L !== 'none') I = Math.max(I, 0.8);
+  I = Math.max(I, G.mark * 0.75);
+  if (G.scanPhase && G.scanPhase !== 'off') I = Math.max(I, 0.82);
+  for (const b of BOATS) if (b.alive && Math.abs(b.s - G.s) < 320) { I = Math.max(I, 0.62); break; }
+  for (const h of HUNTERS) if (h.alive && h.mode === 'hunt') { I = Math.max(I, 0.66); break; }
+  if (thrShown > 0) I = Math.max(I, 0.6);
+  if (G.hurtT != null && G.t - G.hurtT < 2.5) I = Math.max(I, 0.75);
+  if (GATE.up) { const d = GATE_S - G.s; if (d < 700 && d > -20) I = Math.max(I, d < 320 ? 1 : 0.85); }
+  return Math.min(1, I);
+}
+
 // ------------------------------------------------------------------ off-screen threat indicator
 // Anything that locks / fires / attacks registers here; an edge chevron points to it while it is off-screen or hidden
 // (around a bend, or across the water surface), fading 1.5 s after the threat ends.
@@ -3551,6 +3573,18 @@ for (const b of tipsSeg.children) {
   b.addEventListener('keydown', (ev) => ev.stopPropagation());
 }
 syncTips();
+// round 19: Music / Музыка toggle (start screen) + N key; persisted by audio.js
+const musSeg = document.querySelector('#musSel .seg');
+function syncMusic() { if (musSeg) for (const b of musSeg.children) b.classList.toggle('on', (b.dataset.v === '1') === audio.musicOn); }
+function setMusic(on, announce = false) {
+  audio.init(); audio.setMusic(on); syncMusic();
+  if (announce) toast(`MUSIC · <b>${on ? 'ON' : 'OFF'}</b> <i>/ МУЗЫКА ${on ? 'ВКЛ' : 'ВЫКЛ'}</i>`, 1.4, true);
+}
+if (musSeg) for (const b of musSeg.children) {
+  b.addEventListener('click', (ev) => { ev.stopPropagation(); setMusic(b.dataset.v === '1'); b.blur(); });
+  b.addEventListener('keydown', (ev) => ev.stopPropagation());
+}
+syncMusic();
 hud.engBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); cycleEngine(); });
 // leaving mid-flight (e.g. Ctrl+W while Ctrl is the dive key) asks first
 addEventListener('beforeunload', (e) => {
@@ -3564,6 +3598,7 @@ addEventListener('keydown', (e) => {
     legendMode = visible ? 'off' : 'on';
   }
   if (e.code === 'KeyM' && !e.repeat) audio.toggleMute();
+  if (e.code === 'KeyN' && !e.repeat) setMusic(!audio.musicOn, G.phase !== 'start');
   if (e.code === 'Enter' || e.code === 'Space') {
     if (G.phase === 'start') startGame();
     else if (G.phase === 'result') { reset(); startGame(); }
@@ -3838,6 +3873,7 @@ function loop() {
 
   updateHUD(dt, time);
   updateAudioScene();
+  audio.music(musicIntensity(), G.phase === 'start' ? 'menu' : G.phase === 'failed' ? 'play' : 'play', camUnder, realDt);
   audio.update(G.speed * (1 - G.dip), G.boost, camUnder, G.skim || 0, G.phase !== 'start' && G.phase !== 'result', G.prox || 0, G.y, (G.dive || G.underwater) ? 0 : G.scan);
   audio.steam(G.phase === 'flight' && !camUnder ? G.steam : 0);
   renderer.info.reset();
@@ -3867,6 +3903,7 @@ window.__lethe = {
     rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol, engineSound: audio.engine,
     aim: aimObj ? (TURRETS.includes(aimObj) ? 'turret' : DRONES.includes(aimObj) ? 'drone' : MINES.includes(aimObj) ? 'mine' : HUNTERS.includes(aimObj) ? 'hunter'
       : BOATS.includes(aimObj) ? 'boat' : isCore(aimObj) ? 'core' : 'relay') : null, turretKills: G.turretKills,
+    music: { on: audio.musicOn, intensity: +(audio.mI || 0).toFixed(3), target: +musicIntensity().toFixed(3), step: audio.mStep || 0 },
     checkpoint: { cp: G.cp, n: CP_N, deaths: G.deaths, invuln: +G.invuln.toFixed(2), on: CP_ON, list: CHECKPOINTS },
     gate: { up: GATE.up, hold: GATE.hold, s: GATE_S, cores: GATE.cores.map((c) => (c.alive ? c.hp : 0)), coreKills: G.coreKills }, act: G.act,
     mission: { shots: G.shots, shotHits: G.shotHits, deaths: G.deaths, killsTotal: G.killsTotal ?? null, accuracy: G.accuracy ?? null },
