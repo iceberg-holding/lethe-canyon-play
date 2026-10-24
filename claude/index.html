@@ -58,6 +58,13 @@
   @keyframes burnS{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
   #rCargoRow.burn .bar{box-shadow:0 0 8px rgba(190,235,255,.55)}
   #pR{position:absolute;right:calc(16px + var(--sr));top:calc(10px + var(--st));text-align:right}
+  #dampCue{position:absolute;right:calc(16px + var(--sr));top:calc(118px + var(--st));max-width:240px;text-align:right;
+    font-size:10px;font-weight:600;letter-spacing:.14em;line-height:1.25;color:#ffb15e;opacity:0;transition:opacity .2s;
+    text-shadow:0 0 8px rgba(255,160,60,.5),0 1px 2px #000}
+  #dampCue i{display:block;font-style:normal;font-weight:500;font-size:8px;letter-spacing:.1em;color:rgba(255,214,170,.82);margin-top:2px}
+  #dampCue.on{opacity:1;animation:dampP .75s ease-in-out infinite}
+  @keyframes dampP{50%{opacity:.5}}
+  #pR.damp #tSpeed{color:#ffb15e;text-shadow:0 0 8px rgba(255,150,50,.65)}
   .stat{margin-bottom:4px}
   .stat .k{font-size:9px;color:var(--dim);font-weight:500}
   .stat .k i{font-style:normal;opacity:.6}
@@ -347,6 +354,7 @@
     <div class="stat"><div class="k">SPEED <i>/ СКОРОСТЬ</i></div><div><span class="v" id="tSpeed">0</span><span class="u">KM/H</span></div></div>
     <div class="stat"><div class="k">TO B <i>/ ДО Б</i></div><div><span class="v" id="tDist">0</span><span class="u">KM</span></div></div>
   </div>
+  <div id="dampCue">BOAT SCAN — DIVE<i>КАТЕР СКАНИРУЕТ — НЫРЯЙ</i></div>
   <div id="route"><span class="ab" style="left:0">A</span><span class="ab" style="right:0">B</span><div id="routeBar"><div id="routeShip"></div></div></div>
   <div id="markBox"><div class="lbl"><span>MARK <i>/ МЕТКА</i></span><b id="tMark">0%</b></div><div class="bar" id="bMark"><div class="v"></div></div></div>
   <div id="airBox"><div class="lbl"><span>AIR <i>/ ВОЗДУХ</i></span><b id="tAir">60s</b></div><div class="bar" id="bAir"><div class="v"></div></div></div>
@@ -367,7 +375,7 @@
       </svg>
       <div class="tx">
         <div class="tk"><span class="dk"><kbd>E</kbd> dive, then <kbd>R</kbd> torpedo <i>· жми E, затем R</i></span><span class="tt">Tap <b>DIVE</b>, then <b>ROCKET</b> <i>· НЫРОК, затем РАКЕТА</i></span></div>
-        <div class="tc">dive ↓, then torpedo → boat<i>нырни ↓, затем торпеда → катер</i></div>
+        <div class="tc">scan beam damps engines — dive ↓, torpedo → boat<i>луч глушит двигатели — нырни ↓, торпеда → катер</i></div>
       </div>
     </div>
   </div>
@@ -410,7 +418,7 @@
       </div>
       <div class="eng" id="engSel"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div>
         <span id="tipsSel"><span class="engL">TIPS <i>/ ПОДСКАЗКИ</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span></div>
-      <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i></div>
+      <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive. A boat's scan beam damps your engines — dive, then kill it from below.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй. Луч катера глушит двигатели — нырни и бей снизу.</i></div>
     </div>
   </div>
   <div class="edition">CORMORANT / БАКЛАН<span>AMPHIBIOUS WATER COURIER</span></div>
