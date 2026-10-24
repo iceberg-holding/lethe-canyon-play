@@ -339,6 +339,14 @@
   #act.on{animation:actIn 3.6s ease forwards}
   @keyframes actIn{0%{opacity:0;letter-spacing:.6em}12%{opacity:1}78%{opacity:1}100%{opacity:0}}
   #routeBar .gt{position:absolute;top:-4px;width:3px;height:11px;margin-left:-1px;background:#ff5a3a;box-shadow:0 0 6px #ff5a3a}
+  /* round 18: checkpoint cue + route ticks */
+  #cpCue{position:absolute;left:50%;top:42%;transform:translate(-50%,0);text-align:center;pointer-events:none;opacity:0;white-space:nowrap}
+  #cpCue b{display:block;font-size:clamp(16px,2.2vw,26px);font-weight:500;letter-spacing:.36em;color:#9ff2d8;text-shadow:0 0 14px rgba(60,255,190,.55),0 1px 3px rgba(0,0,0,.8)}
+  #cpCue span{display:block;font-size:10px;letter-spacing:.3em;color:rgba(190,255,230,.75);margin-top:3px}
+  #cpCue.on{animation:cpIn 1.9s ease forwards}
+  @keyframes cpIn{0%{opacity:0;transform:translate(-50%,8px)}12%{opacity:1;transform:translate(-50%,0)}75%{opacity:1}100%{opacity:0}}
+  #routeBar .cp{position:absolute;top:-3px;width:5px;height:9px;margin-left:-2px;border:1px solid rgba(160,255,215,.7);border-radius:1px;box-sizing:border-box}
+  #routeBar .cp.on{background:#7fffd0;box-shadow:0 0 6px #7fffd0}
   #routeBar .at{position:absolute;top:-2px;width:1px;height:7px;background:rgba(255,240,225,.55)}
   #rotate{display:none;z-index:40;background:#140a07;align-items:center;justify-content:center;flex-direction:column;gap:18px;font-size:12px;letter-spacing:.3em;text-align:center;line-height:1.8}
   @media (orientation:portrait) and (max-width:900px){ #rotate{display:flex} }
@@ -392,6 +400,7 @@
   <div id="msg"></div>
   <div id="pop"></div>
   <div id="act"></div>
+  <div id="cpCue"></div>
 <div id="toast"></div>
   <div id="intro"></div>
   <div id="tut">

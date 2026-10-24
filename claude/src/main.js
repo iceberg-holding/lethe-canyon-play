@@ -7,7 +7,7 @@ import { clamp, lerp, damp, smoothstep } from './util.js';
 import {
   PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
   ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, zoneLinked, resetLevel,
-  MINES, HUNTERS, BOATS, bedY, underLim, GATE_S, GATE_HOLD, GATE_BEAM,
+  MINES, HUNTERS, BOATS, bedY, underLim, GATE_S, GATE_HOLD, GATE_BEAM, CHECKPOINTS,
 } from './world.js';
 import { buildGate, GATE_CORES, CORE_HP } from './gate.js';
 import {
@@ -29,6 +29,7 @@ const AUTOPILOT = params.get('autopilot') === '1';
 const TIPS_KEY = 'lethe.tips', TUT_KEY = 'lethe.tips.boat';
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+const CP_ON = params.get('cp') !== '0';   // round 18: ?cp=0 = classic (death ends the mission)
 const tipsParam = params.get('tips');   // ?tips=0 / ?tips=1 override for this page load only (tests)
 let tipsOn = tipsParam !== null ? tipsParam !== '0' : lsGet(TIPS_KEY) !== '0';
 // round 17: per-threat intro prompts (drone, turret) — one key each, re-armed with the boat tutorial
@@ -356,7 +357,7 @@ const hud = {
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
   dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'), tut: $('tut'),
   pR: $('pR'), dampCue: $('dampCue'),
-  act: $('act'), routeBar: $('routeBar'), intro: $('intro'),   // round 16 (null-guarded: an old index.html must not crash the loop)
+  act: $('act'), routeBar: $('routeBar'), intro: $('intro'), cpCue: $('cpCue'),   // round 16 (null-guarded: an old index.html must not crash the loop)
 };
 for (let i = 0; i < ROCKET_AMMO; i++) hud.pips.appendChild(document.createElement('i'));
 const zoneEls = ZONES.map((z) => {
@@ -405,6 +406,7 @@ function freshState() {
     dmgTaken: 0, uwCam: 0,
     scan: 0, scanWant: 0, scanCap: 62, scanPhase: 'off', scanBoat: -1, scanDrawn: 0,
     act: -1, shots: 0, shotHits: 0, coreKills: 0, deaths: 0, gateT: null,   // round 16
+    cp: -1, cpSnap: null, invuln: 0, respawn: false,   // round 18
   };
 }
 G = freshState();
@@ -526,6 +528,7 @@ function shieldImpact(p) {
 // returns damage that got through to the hull/cargo
 function damage(amount, p, kind) {
   if (G.phase === 'result' || G.phase === 'failed') return 0;
+  if (G.invuln > 0) return 0;   // round 18: brief respawn protection
   G.dmgTaken += amount;
   G.shieldCd = SHIELD_DELAY;
   let rest = amount;
@@ -566,7 +569,10 @@ function fail(en, ru) {
   if (G.phase === 'failed' || G.phase === 'result') return;
   G.phase = 'failed'; G.phaseT = 0; G.outcome = 'failed'; G.reason = en + ' / ' + ru;
   G.dive = false;
-  showMsg('MISSION FAILED', 'МИССИЯ ПРОВАЛЕНА', 3, '#ff7a5a');
+  G.deaths++;
+  G.respawn = CP_ON;   // round 18: respawn at the last checkpoint instead of ending the mission
+  if (G.respawn) showMsg(`SHIP DOWN — ${en}`, `КОРАБЛЬ ПОДБИТ — ${ru}`, 2.2, '#ff7a5a');
+  else showMsg('MISSION FAILED', 'МИССИЯ ПРОВАЛЕНА', 3, '#ff7a5a');
   explode(shipPos, 0.8);
   audio.explosion(1.2, 1);
 }
@@ -2572,6 +2578,67 @@ function updateGate(dt, time) {
   }
 }
 
+// ------------------------------------------------------------------ round 18: checkpoints + respawn
+// Passing a checkpoint stores cargo / health / shield / rockets. On death the ship respawns there after ~2 s with at
+// least 40 % cargo and 60 % health, full air and ~3 s of protection. Everything already destroyed stays destroyed
+// (incl. gate generators); deaths are counted on the result screen. ?cp=0 restores the old "death ends the run".
+const cpTicks = CHECKPOINTS.map((c, i) => (i ? routeTick(c, 'cp', `CHECKPOINT ${i}`) : null));
+const CP_N = CHECKPOINTS.length - 1;
+function cpSnapshot() { return { cargo: G.cargo, health: G.health, shield: G.shield, rockets: G.rockets }; }
+function cpCue(i) {
+  if (hud.cpCue) {
+    hud.cpCue.innerHTML = `<b>CHECKPOINT ${i}/${CP_N}</b><span>ЧЕКПОИНТ ${i}/${CP_N}</span>`;
+    hud.cpCue.classList.remove('on'); void hud.cpCue.offsetWidth; hud.cpCue.classList.add('on');
+  }
+  audio.beep(1320); setTimeout(() => audio.beep(1760), 110);
+}
+function updateCheckpoints(dt, time) {
+  if (G.invuln > 0) G.invuln -= dt;
+  ship.group.visible = !(G.invuln > 0 && (time * 9) % 1 < 0.3);
+  if (G.phase === 'flight' || G.phase === 'takeoff') {
+    while (G.cp + 1 < CHECKPOINTS.length && G.s >= CHECKPOINTS[G.cp + 1]) {
+      G.cp++;
+      G.cpSnap = cpSnapshot();
+      if (G.cp > 0) { cpCue(G.cp); cpTicks[G.cp]?.classList.add('on'); }
+    }
+  }
+  // in-world markers: a pair of green lamps on the banks at each checkpoint ahead
+  for (let i = 1; i < CHECKPOINTS.length; i++) {
+    const c = CHECKPOINTS[i], ds = c - G.s;
+    if (ds < -60 || ds > 700) continue;
+    const on = i <= G.cp, k = on ? 0.5 : 0.9 + 0.3 * Math.sin(time * 5);
+    for (const side of [-1, 1]) {
+      toWorld(c, side * (riverHalf(c) + 1.5), 3.5, V4);
+      if (camUnder) continue;
+      glows.add(V4.x, V4.y, V4.z, on ? 0.4 : 0.5, on ? 1.2 : 2.2, on ? 0.7 : 1.1, k, 7);
+      glows.add(V4.x, V4.y, V4.z, 0.3, 1.4, 0.8, k * 0.35, 18);
+    }
+  }
+}
+function respawn() {
+  const i = Math.max(0, G.cp), c = CHECKPOINTS[i], snap = G.cpSnap || { cargo: 100, health: 100, shield: SHIELD_MAX, rockets: ROCKET_AMMO };
+  endTutorial(); endIntro();
+  G.phase = 'flight'; G.phaseT = 0; G.outcome = null; G.reason = ''; G.respawn = false;
+  G.s = c; G.lat = 0; G.y = 12; G.vY = 0; G.vLat = 0; G.speed = 45; G.boost = 0;
+  G.dive = false; G.underwater = false; G.wasUnder = false; G.air = 60; G.airOut = false; G.dip = 0; G.apDiveT = 0;
+  G.yaw = 0; G.pitch = 0; G.roll = 0; G.hitCd = 0; G.rad = 0;
+  G.cargo = Math.max(snap.cargo, 40); G.health = Math.max(snap.health, 60); G.shield = Math.max(snap.shield, SHIELD_MAX * 0.5); G.rockets = Math.max(snap.rockets, 2);
+  disp.cargo = disp.gc = G.cargo;
+  G.invuln = 3;
+  G.mark = 0; G.lock = { phase: 'none', t: 0, turret: null, shots: 0 };
+  G.scan = 0; G.scanWant = 0; G.scanPhase = 'off'; G.scanBoat = -1;
+  for (const b of bolts) b.on = false;
+  for (const b of ebolts) b.on = false;
+  for (const r of rockets) r.on = false;
+  for (const t of torps) t.on = false;
+  TORP.target = null; TORP.lockT = 0;
+  for (const b of BOATS) if (b.alive && b.fire && b.fire !== 'idle') { b.fire = 'idle'; b.cd = 3; }
+  threats.clear();
+  camInit = false;
+  showMsg(i ? `CHECKPOINT ${i} — RESPAWN` : 'RESPAWN — START', i ? `ЧЕКПОИНТ ${i} — ВОЗВРАТ` : 'ВОЗВРАТ НА СТАРТ', 2, '#9ff2d8');
+  if (i) cpTicks[i]?.classList.add('on');
+}
+
 // ------------------------------------------------------------------ off-screen threat indicator
 // Anything that locks / fires / attacks registers here; an edge chevron points to it while it is off-screen or hidden
 // (around a bend, or across the water surface), fading 1.5 s after the threat ends.
@@ -2767,6 +2834,7 @@ function updateHazards(dt) {
       let k = rate * dt;
       while (Math.random() < k) { audio.click(); k -= 1; }
     }
+    if (G.invuln > 0) G.health = Math.max(G.health, 1);
     if (G.health <= 0) { G.health = 0; fail('PILOT INCAPACITATED', 'ПИЛОТ ПОТЕРЯЛ СОЗНАНИЕ'); }
   } else {
     G.rad *= Math.exp(-dt * 3);
@@ -3408,6 +3476,8 @@ function reset() {
   for (const m of MASTS) delete m.tagT;
   resetGate();
   if (hud.act) hud.act.classList.remove('on');
+  ship.group.visible = true;
+  cpTicks.forEach((e) => e?.classList.remove('on'));
 }
 
 function startGame() {
@@ -3715,8 +3785,10 @@ function loop() {
   updateNaval(dt, time);
   updateHazards(dt);
   updateGate(dt, time);
+  updateCheckpoints(dt, time);
   if (G.phase === 'landed' && G.phaseT > 1.6) showResult();
-  if (G.phase === 'failed' && G.phaseT > 2.6) showResult();
+  if (G.phase === 'failed' && G.respawn && G.phaseT > 2.2) respawn();
+  else if (G.phase === 'failed' && G.phaseT > 2.6) showResult();
   updateCamera(dt, time);
 
   if (G.flash && G.flash.t > 0) {
@@ -3795,6 +3867,7 @@ window.__lethe = {
     rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol, engineSound: audio.engine,
     aim: aimObj ? (TURRETS.includes(aimObj) ? 'turret' : DRONES.includes(aimObj) ? 'drone' : MINES.includes(aimObj) ? 'mine' : HUNTERS.includes(aimObj) ? 'hunter'
       : BOATS.includes(aimObj) ? 'boat' : isCore(aimObj) ? 'core' : 'relay') : null, turretKills: G.turretKills,
+    checkpoint: { cp: G.cp, n: CP_N, deaths: G.deaths, invuln: +G.invuln.toFixed(2), on: CP_ON, list: CHECKPOINTS },
     gate: { up: GATE.up, hold: GATE.hold, s: GATE_S, cores: GATE.cores.map((c) => (c.alive ? c.hp : 0)), coreKills: G.coreKills }, act: G.act,
     mission: { shots: G.shots, shotHits: G.shotHits, deaths: G.deaths, killsTotal: G.killsTotal ?? null, accuracy: G.accuracy ?? null },
     relaysAlive: BEACONS.filter((b) => b.alive).length, relaysDown: BEACONS.filter((b) => !b.alive).length, relayKills: G.relayKills,
@@ -3836,6 +3909,7 @@ window.__lethe = {
   input,
   debug: {
     hitCore: (i, d = 99) => hitCore(GATE.cores[i], d),
+    kill: () => fail('DEBUG', 'ОТЛАДКА'),
     gateWarp: (back = 300) => { G.s = GATE_S - back; G.y = 14; G.lat = 0; G.speed = 60; },
     breakMast: (i) => breakMast(MASTS[i]),
     setCargo: (v) => { G.cargo = clamp(v, 0, 100); disp.cargo = disp.gc = G.cargo; },

@@ -175,6 +175,10 @@ export const WRECK = { s: 2960, side: -1 };
 export const GATE_S = PAD_B - 540, GATE_HOLD = 58, GATE_BEAM = 46;
 for (let i = ROCKS.length - 1; i >= 0; i--) if (ROCKS[i].s > GATE_S - 150 && ROCKS[i].s < GATE_S + 40) ROCKS.splice(i, 1);
 
+// Round 18: checkpoints along the canyon (the start counts as checkpoint 0). Chosen clear of arches, just past the
+// boats; the respawn lane (s-30 .. s+140) is cleared of rocks so a respawn never lands in a boulder.
+export const CHECKPOINTS = [300, 1650, 3300, 4950, 6450, GATE_S - 360];
+
 // Shield zones: each one has a force-field emitter mast.
 export const ZONES = [];
 {
@@ -369,3 +373,6 @@ export function resetLevel() {
   for (const h of HUNTERS) { h.alive = !h.debug; h.s = h.home; }
   for (const b of BOATS) { b.alive = !b.debug; b.s = b.home; b.lat = b.lat0; b.dir = b.dir0; }
 }
+
+// round 18: clear the checkpoint respawn lanes of rocks (after all seeded placement, so the rest of the layout is unchanged)
+for (const c of CHECKPOINTS) for (let i = ROCKS.length - 1; i >= 0; i--) if (ROCKS[i].s > c - 30 && ROCKS[i].s < c + 140) ROCKS.splice(i, 1);
