@@ -5,6 +5,10 @@ Chinese instruments) was generated with Suno on the owner's paid plan, which gra
 trimmed into seamless loops and loudness-normalised (-16 LUFS); loop points are in `assets/music/music.json`.
 With `?music=proc`, or if the files fail to load, the round 19 procedural score below plays instead.
 
+**Music styles (round 22):** the ELECTRO (E minor, `electro-*.mp3`) and ROCK (A, `rock-*.mp3`) layer sets were also
+generated with Suno on the same paid plan and processed the same way. The start-screen MUSIC STYLE selector (or
+`?style=chinese|electro|rock|proc`) picks CHINESE, ELECTRO, ROCK or SYNTH (the procedural score); only the chosen style downloads.
+
 **All sound effects in this build are procedural.** There are no sound-effect sample files, no recordings and no third-party
 sound assets: every sound is synthesised at runtime with the Web Audio API in `src/audio.js`
 (oscillators, a generated white-noise buffer, biquad filters, a wave-shaper, a delay-feedback slap echo,

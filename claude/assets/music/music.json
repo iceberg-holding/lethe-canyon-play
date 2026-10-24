@@ -1,5 +1,5 @@
 {
- "note": "LETHE r21 music (Suno, commercial use on the owner's paid plan). Each file: loop region [loopStart, loopEnd] in seconds; the end is crossfaded into the pre-loop audio, so AudioBufferSourceNode loop points are seamless. All loops normalised to -16 LUFS.",
+ "note": "LETHE r21/r22 music (Suno, commercial use on the owner's paid plan). Each file: loop region [loopStart, loopEnd] in seconds; the end is crossfaded into the pre-loop audio, so AudioBufferSourceNode loop points are seamless. All loops normalised to -16 LUFS. r22: styles.<chinese|electro|rock>.sets.<mix|1|2> pick one take per layer; the top-level sets/duel are the chinese style (kept for older builds).",
  "sets": {
   "mix": {
    "calm": "calm-v2",
@@ -118,6 +118,219 @@
     186.558
    ],
    "lufs": -16.0
+  },
+  "electro-calm-v1": {
+   "file": "electro-calm-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 100.303787,
+   "dur": 100.804,
+   "src": "LETHE - Electro Calm v1.mp3",
+   "srcLoop": [
+    44.47,
+    144.274
+   ],
+   "lufs": -16.0
+  },
+  "electro-calm-v2": {
+   "file": "electro-calm-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 81.320998,
+   "dur": 81.821,
+   "src": "LETHE - Electro Calm v2.mp3",
+   "srcLoop": [
+    72.75,
+    153.571
+   ],
+   "lufs": -16.0
+  },
+  "electro-tension-v1": {
+   "file": "electro-tension-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 45.97102,
+   "dur": 46.471,
+   "src": "LETHE - Electro Tension v1.mp3",
+   "srcLoop": [
+    40.8,
+    86.271
+   ],
+   "lufs": -16.0
+  },
+  "electro-tension-v2": {
+   "file": "electro-tension-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 70.496984,
+   "dur": 70.997,
+   "src": "LETHE - Electro Tension v2.mp3",
+   "srcLoop": [
+    40.87,
+    110.867
+   ],
+   "lufs": -16.0
+  },
+  "electro-battle-v1": {
+   "file": "electro-battle-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 59.975805,
+   "dur": 60.476,
+   "src": "LETHE - Electro Battle v1.mp3",
+   "srcLoop": [
+    142.97,
+    202.446
+   ],
+   "lufs": -16.0
+  },
+  "electro-battle-v2": {
+   "file": "electro-battle-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 52.66,
+   "dur": 53.16,
+   "src": "LETHE - Electro Battle v2.mp3",
+   "srcLoop": [
+    127.13,
+    179.29
+   ],
+   "lufs": -16.0
+  },
+  "rock-calm-v1": {
+   "file": "rock-calm-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 96.502993,
+   "dur": 97.003,
+   "src": "LETHE - Rock Calm v1.mp3",
+   "srcLoop": [
+    18.46,
+    114.463
+   ],
+   "lufs": -16.0
+  },
+  "rock-calm-v2": {
+   "file": "rock-calm-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 67.027982,
+   "dur": 67.528,
+   "src": "LETHE - Rock Calm v2.mp3",
+   "srcLoop": [
+    49.18,
+    115.708
+   ],
+   "lufs": -16.0
+  },
+  "rock-tension-v1": {
+   "file": "rock-tension-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 47.641088,
+   "dur": 48.141,
+   "src": "LETHE - Rock Tension v1.mp3",
+   "srcLoop": [
+    31.18,
+    78.321
+   ],
+   "lufs": -16.0
+  },
+  "rock-tension-v2": {
+   "file": "rock-tension-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 47.989184,
+   "dur": 48.489,
+   "src": "LETHE - Rock Tension v2.mp3",
+   "srcLoop": [
+    15.53,
+    63.019
+   ],
+   "lufs": -16.0
+  },
+  "rock-battle-v1": {
+   "file": "rock-battle-v1.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 88.783084,
+   "dur": 89.283,
+   "src": "LETHE - Rock Battle v1.mp3",
+   "srcLoop": [
+    48.34,
+    136.623
+   ],
+   "lufs": -16.0
+  },
+  "rock-battle-v2": {
+   "file": "rock-battle-v2.mp3",
+   "loopStart": 0.5,
+   "loopEnd": 51.288186,
+   "dur": 51.788,
+   "src": "LETHE - Rock Battle v2.mp3",
+   "srcLoop": [
+    32.76,
+    83.548
+   ],
+   "lufs": -16.0
+  }
+ },
+ "styles": {
+  "chinese": {
+   "en": "CHINESE",
+   "sets": {
+    "mix": {
+     "calm": "calm-v2",
+     "tension": "tension-v1",
+     "battle": "battle-v2"
+    },
+    "1": {
+     "calm": "calm-v1",
+     "tension": "tension-v1",
+     "battle": "battle-v1"
+    },
+    "2": {
+     "calm": "calm-v2",
+     "tension": "tension-v2",
+     "battle": "battle-v2"
+    }
+   },
+   "duel": {
+    "mix": "duel-v2",
+    "1": "duel-v1",
+    "2": "duel-v2"
+   }
+  },
+  "electro": {
+   "en": "ELECTRO",
+   "key": "E minor",
+   "sets": {
+    "mix": {
+     "calm": "electro-calm-v2",
+     "tension": "electro-tension-v2",
+     "battle": "electro-battle-v2"
+    },
+    "1": {
+     "calm": "electro-calm-v1",
+     "tension": "electro-tension-v1",
+     "battle": "electro-battle-v1"
+    },
+    "2": {
+     "calm": "electro-calm-v2",
+     "tension": "electro-tension-v2",
+     "battle": "electro-battle-v2"
+    }
+   }
+  },
+  "rock": {
+   "en": "ROCK",
+   "key": "A",
+   "sets": {
+    "mix": {
+     "calm": "rock-calm-v1",
+     "tension": "rock-tension-v1",
+     "battle": "rock-battle-v1"
+    },
+    "1": {
+     "calm": "rock-calm-v1",
+     "tension": "rock-tension-v1",
+     "battle": "rock-battle-v1"
+    },
+    "2": {
+     "calm": "rock-calm-v2",
+     "tension": "rock-tension-v2",
+     "battle": "rock-battle-v2"
+    }
+   }
   }
  }
 }

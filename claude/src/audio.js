@@ -2,7 +2,14 @@
 //   voices -> [panner] -> world bus -> underwater low-pass -> pre-master
 //            \-> reverb send (generated canyon impulse) + slap echo (delay feedback) -/
 //   pre-master -> bus compressor -> volume -> limiter -> destination
-const LS_KEY = 'lethe.audio', LS_ENGINE = 'lethe.engine', LS_MUSIC = 'lethe.music';
+const LS_KEY = 'lethe.audio', LS_ENGINE = 'lethe.engine', LS_MUSIC = 'lethe.music', LS_STYLE = 'lethe.musicStyle';
+// round 22: music styles (start-screen selector, ?style=); proc = the round 19 procedural synth score
+export const MUSIC_STYLES = [
+  { id: 'chinese', en: 'CHINESE', ru: 'КИТАЙ' },
+  { id: 'electro', en: 'ELECTRO', ru: 'ЭЛЕКТРО' },
+  { id: 'rock', en: 'ROCK', ru: 'РОК' },
+  { id: 'proc', en: 'SYNTH', ru: 'СИНТ' },
+];
 export const ENGINES = [
   { id: 'whisper', en: 'Jet whisper', ru: 'Шёпот' },
   { id: 'turbine', en: 'Turbine', ru: 'Турбина' },
@@ -36,6 +43,13 @@ export class Audio {
     const mp = P && P.get('music'), mv = P && P.get('mv');
     this.musicMode = mp === 'proc' || mp === 'duel' ? mp : 'suno';
     this.musicSet = mv === '1' || mv === '2' ? mv : 'mix';
+    // round 22: style = ?style=chinese|electro|rock|proc (synth also accepted), else the saved choice, else chinese
+    const okStyle = (v) => (v === 'synth' ? 'proc' : MUSIC_STYLES.some((x) => x.id === v) ? v : null);
+    let st = okStyle(P && P.get('style'));
+    if (!st) { try { st = okStyle(localStorage.getItem(LS_STYLE)); } catch (e) { /* ignore */ } }
+    this.musicStyle = mp === 'proc' ? 'proc' : mp === 'duel' ? 'chinese' : st || 'chinese';
+    this.sunoOld = [];   // layers of the previous style, kept playing until the new style's calm layer is in
+    this.man = null;
     this.suno = { state: 'idle', layers: {}, cur: null, curT: 0, err: null, files: {} };
     this.lowMem = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } })();
   }
@@ -157,7 +171,7 @@ export class Audio {
       if (document.hidden) { if (this.ctx.state === 'running') { this.ctx.suspend(); this.bgSuspended = true; } }
       else if (this.bgSuspended) { this.bgSuspended = false; this.ctx.resume(); }
     });
-    if (this.musicMode !== 'proc') {
+    if (this.recorded()) {
       // lazy: only after the page (and the loading bar) is done, never competing with the game's own assets
       const go = () => setTimeout(() => this.loadSuno(), 200);
       if (document.readyState === 'complete') go(); else addEventListener('load', go, { once: true });
@@ -489,29 +503,43 @@ export class Audio {
     while (this.mNext < now + 0.18) { this.mStepAt(this.mStep, this.mNext, STEP); this.mNext += STEP; this.mStep++; }
   }
   // ---------------------------------------------------------------- round 21: recorded adaptive layers
+  recorded() { return this.musicMode !== 'proc' && this.musicStyle !== 'proc'; }
   async loadSuno() {
     const S = this.suno;
-    if (S.state !== 'idle' || !this.ctx) return;
+    if (S.state !== 'idle' || !this.ctx || !this.recorded()) return;
     S.state = 'loading';
+    const style = this.musicStyle;
+    let ac = null; try { ac = new AbortController(); } catch (e) { /* old browsers: no abort */ }
+    S.abort = ac;
+    const opt = ac ? { signal: ac.signal } : undefined;
     try {
       const base = new URL('assets/music/', document.baseURI).href;
-      const r0 = await fetch(base + 'music.json');
-      if (!r0.ok) throw new Error('music.json ' + r0.status);
-      const man = await r0.json();
-      const want = this.musicMode === 'duel' ? { duel: man.duel[this.musicSet] } : man.sets[this.musicSet];
+      if (!this.man) {
+        const r0 = await fetch(base + 'music.json', opt);
+        if (!r0.ok) throw new Error('music.json ' + r0.status);
+        this.man = await r0.json();
+      }
+      const man = this.man;
+      if (S !== this.suno) return;
+      const sty = (man.styles && man.styles[style]) || (style === 'chinese' ? man : null);
+      if (!sty) throw new Error('style ' + style + ' not in music.json');
+      const want = this.musicMode === 'duel' ? { duel: man.duel[this.musicSet] } : sty.sets[this.musicSet] || sty.sets.mix;
       for (const layer of this.musicMode === 'duel' ? ['duel'] : ['calm', 'tension', 'battle']) {   // calm first: usable at once
         const t = man.tracks[want[layer]];
-        const r = await fetch(base + t.file);
+        const r = await fetch(base + t.file, opt);
         if (!r.ok) throw new Error(t.file + ' ' + r.status);
         const buf = await this.decodeMusic(await r.arrayBuffer());
+        if (S !== this.suno) return;   // style switched meanwhile: drop it
         this.addLayer(layer, buf, t);
         S.files[layer] = want[layer];
       }
       S.state = 'ready';
     } catch (e) {
+      if (S !== this.suno) return;   // aborted by a style switch
       // any failure: keep whatever loaded; with nothing loaded the procedural score simply carries on
       S.err = String(e && e.message || e);
       S.state = Object.keys(S.layers).length ? 'partial' : 'failed';
+      if (S.state === 'failed' && this.sunoOld.length && this.ctx) this.fadeOld(0.6);   // a switch failed: procedural takes over
       console.warn('[music] recorded score unavailable (' + S.err + '), using ' + (S.state === 'failed' ? 'procedural' : 'loaded layers'));
     }
   }
@@ -542,6 +570,38 @@ export class Audio {
     s.connect(L.g); s.start(this.ctx.currentTime + 0.02, offset);
     L.src = s;
   }
+  // round 22: switch the music style. The old style keeps playing until the new calm layer is decoded, then they
+  // crossfade (sunoMusic); SYNTH fades the recorded score out and the procedural one in. Only the new style downloads.
+  setStyle(id) {
+    if (id === 'synth') id = 'proc';
+    if (!MUSIC_STYLES.some((x) => x.id === id)) return;
+    try { localStorage.setItem(LS_STYLE, id); } catch (e) { /* ignore */ }
+    if (this.musicMode === 'proc' && id !== 'proc') this.musicMode = 'suno';   // ?music=proc was only the start value
+    if (id === this.musicStyle) return;
+    if (this.musicMode === 'duel') this.musicMode = 'suno';
+    this.musicStyle = id;
+    const S = this.suno;
+    if (S.abort) { try { S.abort.abort(); } catch (e) { /* ignore */ } }
+    for (const k in S.layers) this.sunoOld.push(S.layers[k]);
+    this.suno = { state: 'idle', layers: {}, cur: null, curT: 0, err: null, files: {} };
+    if (this.ctx) {
+      // drop old layers that are already silent (not the audible one: it bridges the download)
+      const now = this.ctx.currentTime;
+      this.sunoOld = this.sunoOld.filter((L) => { if (L.g.gain.value > 0.01) return true; this.dropLayer(L, now); return false; });
+      if (id === 'proc') this.fadeOld(0.5);
+      else this.loadSuno();
+    }
+  }
+  fadeOld(tau) {
+    const now = this.ctx.currentTime;
+    for (const L of this.sunoOld) { L.g.gain.cancelScheduledValues(now); L.g.gain.setTargetAtTime(0, now, tau); this.dropLayer(L, now + tau * 7); }
+    this.sunoOld = [];
+  }
+  dropLayer(L, when) {
+    const kill = () => { try { L.src && L.src.stop(); } catch (e) { /* ignore */ } try { L.src && L.src.disconnect(); L.g.disconnect(); } catch (e) { /* ignore */ } L.src = null; L.buf = null; };
+    const ms = Math.max(0, (when - this.ctx.currentTime) * 1000);
+    if (ms < 1) kill(); else setTimeout(kill, ms);
+  }
   // new run: the duel track starts again from its slow opening
   musicRestart() {
     const L = this.suno.layers.duel;
@@ -550,7 +610,12 @@ export class Audio {
   // pick the layer from the smoothed danger (hysteresis + minimum dwell) and crossfade; false = no recorded layer yet
   sunoMusic(mode, now) {
     const S = this.suno, Ls = S.layers;
-    if (this.musicMode === 'proc' || !Object.keys(Ls).length) return false;
+    if (!Object.keys(Ls).length) {
+      if (!this.sunoOld.length) return false;
+      if (!this.recorded()) { this.fadeOld(0.5); return false; }
+      return true;   // new style still downloading: the old one keeps playing
+    }
+    if (this.sunoOld.length) this.fadeOld(0.7);   // new style's first layer is in: crossfade
     const I = this.mI, dwell = now - S.curT;
     let want;
     if (Ls.duel) want = 'duel';
@@ -577,8 +642,8 @@ export class Audio {
   musicInfo() {
     const S = this.suno, g = {};
     for (const k in S.layers) g[k] = +S.layers[k].g.gain.value.toFixed(3);
-    return { mode: this.musicMode, set: this.musicSet, state: S.state, layer: S.cur, files: S.files, gains: g, err: S.err,
-      source: this.musicMode !== 'proc' && Object.keys(S.layers).length ? 'suno' : 'proc',
+    return { mode: this.musicMode, style: this.musicStyle, set: this.musicSet, state: S.state, old: this.sunoOld.length, layer: S.cur, files: S.files, gains: g, err: S.err,
+      source: this.recorded() && (Object.keys(S.layers).length || this.sunoOld.length) ? 'suno' : 'proc',
       pBus: this.pBus ? +this.pBus.gain.value.toFixed(3) : null, sBus: this.sBus ? +this.sBus.gain.value.toFixed(3) : null, ctx: this.ctx ? this.ctx.state : null };
   }
   mStepAt(st, t, STEP) {

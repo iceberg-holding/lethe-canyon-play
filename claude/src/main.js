@@ -18,7 +18,7 @@ import {
 } from './terrain.js';
 import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js';
 import { Ship, makeEnvMap } from './ship.js';
-import { Audio, ENGINES } from './audio.js';
+import { Audio, ENGINES, MUSIC_STYLES } from './audio.js';
 import { input, setupInput, pollInput } from './input.js';
 import { Post, QualityGovernor, TIERS } from './post.js';
 
@@ -3586,6 +3586,22 @@ if (musSeg) for (const b of musSeg.children) {
   b.addEventListener('keydown', (ev) => ev.stopPropagation());
 }
 syncMusic();
+// round 22: music style selector (start screen); picking a style turns music on and previews its calm layer
+const styleSeg = document.querySelector('#styleSel .seg');
+function syncStyle() { if (styleSeg) for (const b of styleSeg.children) b.classList.toggle('on', b.dataset.s === audio.musicStyle); }
+function setStyle(id) {
+  audio.init();
+  if (!audio.musicOn) audio.setMusic(true);
+  audio.setStyle(id); syncStyle(); syncMusic();
+}
+if (styleSeg) for (const st of MUSIC_STYLES) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.dataset.s = st.id; b.innerHTML = `${st.en}<small>${st.ru}</small>`;
+  b.addEventListener('click', (ev) => { ev.stopPropagation(); setStyle(st.id); b.blur(); });
+  b.addEventListener('keydown', (ev) => ev.stopPropagation());
+  styleSeg.appendChild(b);
+}
+syncStyle();
 hud.engBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); cycleEngine(); });
 // leaving mid-flight (e.g. Ctrl+W while Ctrl is the dive key) asks first
 addEventListener('beforeunload', (e) => {
