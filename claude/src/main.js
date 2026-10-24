@@ -3757,13 +3757,77 @@ function updateIntro(rdt) {
   if (INTRO.t >= INTRO_DUR) endIntro();
 }
 
+// ------------------------------------------------------------------ round 20: mobile performance
+// View window ahead of the ship per tier: beyond ~1150 m the air fog (exp2, 0.0019) leaves <1% of the terrain colour,
+// so low/med stop drawing the farthest 240 m chunk. High keeps 1350 m.
+const VIEW_AHEAD = { low: 1150, med: 1250, high: 1350 };
+// Instanced meshes keep one slot per entity for the whole level (drones, turrets, mines, boats, relays...), far /
+// dead ones parked as zero-scale matrices - still vertex-processed every frame. Each one gets a render twin that holds
+// only the live slots (copied when the source changes); the source stays the logic store, hidden from the camera.
+// Identical picture on every tier, far fewer vertices, and no draw call at all when none are in range.
+const INST = [];
+function instCompactInit() {
+  const list = [];
+  scene.traverse((o) => { if (o.isInstancedMesh && o !== debris.mesh) list.push(o); });
+  for (const src of list) {
+    const cap = src.instanceMatrix.count;
+    const dst = new THREE.InstancedMesh(src.geometry, src.material, cap);
+    dst.name = src.name ? src.name + '~' : ''; dst.frustumCulled = false; dst.renderOrder = src.renderOrder;
+    dst.castShadow = src.castShadow; dst.receiveShadow = src.receiveShadow;
+    dst.instanceMatrix.setUsage(THREE.DynamicDrawUsage); dst.count = 0;
+    src.parent.add(dst);
+    src.layers.disableAll();   // logic store only: never rendered (visible flag still means "shown")
+    INST.push({ src, dst, mv: -1, cv: -1, vis: null });
+  }
+}
+function instCompact() {
+  for (const it of INST) {
+    const { src, dst } = it;
+    const ic = src.instanceColor;
+    if (it.mv === src.instanceMatrix.version && it.cv === (ic ? ic.version : -1) && it.vis === src.visible) continue;
+    it.mv = src.instanceMatrix.version; it.cv = ic ? ic.version : -1; it.vis = src.visible;
+    const a = src.instanceMatrix.array, b = dst.instanceMatrix.array, n = Math.min(src.count, src.instanceMatrix.count);
+    if (ic && !dst.instanceColor) dst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(ic.array.length), 3);
+    const ca = ic ? ic.array : null, cb = dst.instanceColor ? dst.instanceColor.array : null;
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+      const o = i * 16;
+      if (a[o] === 0 && a[o + 1] === 0 && a[o + 2] === 0 && a[o + 4] === 0 && a[o + 5] === 0 && a[o + 6] === 0 && a[o + 8] === 0 && a[o + 9] === 0 && a[o + 10] === 0) continue;
+      for (let j = 0; j < 16; j++) b[k * 16 + j] = a[o + j];
+      if (ca) { cb[k * 3] = ca[i * 3]; cb[k * 3 + 1] = ca[i * 3 + 1]; cb[k * 3 + 2] = ca[i * 3 + 2]; }
+      k++;
+    }
+    dst.count = k;
+    dst.visible = src.visible && k > 0;
+    dst.instanceMatrix.needsUpdate = true;
+    if (cb) dst.instanceColor.needsUpdate = true;
+  }
+}
+instCompactInit();
+// Frame pacing: phones run at most 60 fps (120 Hz screens would double the heat for no gameplay gain) and the menu /
+// result / rotate-phone screens at 30. ?fps=N overrides the in-flight cap (e.g. ?fps=30 battery saver, ?fps=0 off).
+const fpsParam = params.has('fps') ? Math.max(0, +params.get('fps') || 0) : null;
+const FPS_CAP = fpsParam != null ? fpsParam : (isTouch ? 60 : 0);
+let lastFrameT = 0;
+function frameDue(now) {
+  const idle = G.phase === 'start' || G.phase === 'result' || (portraitMQ.matches);
+  const cap = idle && isTouch ? Math.min(FPS_CAP || 30, 30) : FPS_CAP;
+  if (!cap) { lastFrameT = now; return true; }
+  const iv = 1000 / cap;
+  const el = now - lastFrameT;
+  if (el < iv - 2.5) return false;   // tolerance for rAF jitter on 60 Hz screens
+  lastFrameT = el > iv * 3 ? now : lastFrameT + iv;
+  return true;
+}
+
 // ------------------------------------------------------------------ main loop
 const clock = new THREE.Clock();
 let pxScale = 600;
 let realDt = 0.016, time = 0, fps = 60, fpsAcc = 0, fpsN = 0, frames = 0;
 const portraitMQ = matchMedia('(orientation: portrait) and (max-width: 900px)');
-function loop() {
+function loop(now) {
   requestAnimationFrame(loop);
+  if (now !== undefined && !frameDue(now)) return;
   const rawDt = clock.getDelta();
   realDt = Math.min(rawDt, 0.25);
   let dt = Math.min(rawDt, 0.05);
@@ -3854,7 +3918,7 @@ function loop() {
 
   // chunk streaming / culling by path distance
   const sv = cineCam ? cineCam.s : G.s;
-  const s0 = sv - 320, s1 = sv + 1350;
+  const s0 = sv - 320, s1 = sv + VIEW_AHEAD[quality];
   for (const c of chunks) c.visible = c.userData.sB > s0 && c.userData.sA < s1;
   for (const w of waters) w.visible = w.userData.sB > s0 && w.userData.sA < s1;
   for (const z of ZONES) if (z.mesh && z.shielded) z.mesh.visible = z.s1 > s0 && z.s0 < s1;
@@ -3873,9 +3937,10 @@ function loop() {
 
   updateHUD(dt, time);
   updateAudioScene();
-  audio.music(musicIntensity(), G.phase === 'start' ? 'menu' : G.phase === 'failed' ? 'play' : 'play', camUnder, realDt);
+  audio.music(musicIntensity(), G.phase === 'start' ? 'menu' : 'play', camUnder, realDt);
   audio.update(G.speed * (1 - G.dip), G.boost, camUnder, G.skim || 0, G.phase !== 'start' && G.phase !== 'result', G.prox || 0, G.y, (G.dive || G.underwater) ? 0 : G.scan);
   audio.steam(G.phase === 'flight' && !camUnder ? G.steam : 0);
+  instCompact();
   renderer.info.reset();
   post.render(time);
   if (++frames === 2) document.getElementById('fade').classList.add('off');
@@ -3945,6 +4010,27 @@ window.__lethe = {
   warp: (s) => { G.s = s; camInit = false; },
   input,
   debug: {
+    // round 20: which visible objects cost draw calls (frustum-tested), grouped by type/material
+    drawList() {
+      const fr = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      const out = {};
+      scene.traverseVisible((o) => {
+        if (!(o.isMesh || o.isPoints || o.isLine || o.isSprite)) return;
+        if (o.frustumCulled && o.geometry && !(o.isSprite) && !fr.intersectsObject(o)) return;
+        const k = (o.isInstancedMesh ? 'I:' : o.isPoints ? 'P:' : '') + (o.name || o.material?.type || '?') + (o.parent && o.parent !== scene ? '<' + (o.parent.name || o.parent.type) : '');
+        out[k] = (out[k] || 0) + (Array.isArray(o.material) ? o.material.length : 1);
+      });
+      return Object.entries(out).sort((a, b) => b[1] - a[1]);
+    },
+    triList() {
+      const out = [];
+      scene.traverseVisible((o) => {
+        if (!(o.isMesh || o.isPoints)) return;
+        const g = o.geometry, n = g.index ? g.index.count / 3 : g.attributes.position.count / 3;
+        out.push([(o.isInstancedMesh ? 'I' + o.count + ':' : '') + (o.name || o.material?.type) + '<' + (o.parent?.name || o.parent?.type) + (o.userData.sA != null ? '@' + o.userData.sA : o.parent?.userData?.sA != null ? '@' + o.parent.userData.sA : ''), Math.round(n * (o.isInstancedMesh ? o.count : 1)), o.frustumCulled]);
+      });
+      return out.sort((a, b) => b[1] - a[1]);
+    },
     hitCore: (i, d = 99) => hitCore(GATE.cores[i], d),
     kill: () => fail('DEBUG', 'ОТЛАДКА'),
     gateWarp: (back = 300) => { G.s = GATE_S - back; G.y = 14; G.lat = 0; G.speed = 60; },

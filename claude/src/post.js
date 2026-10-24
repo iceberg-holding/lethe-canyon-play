@@ -37,9 +37,27 @@ void main(){
 }`,
 };
 
+// round 20: the grade + output (ACES + sRGB) fused into one full-screen pass for the med tier (phones): same maths as
+// GradePass -> OutputPass (ACES copied from three r1xx tonemapping_pars_fragment, exposure 1), one fewer full-res
+// half-float read/write. High keeps the original two-pass chain untouched.
+const GradeOutShader = {
+  uniforms: GradeShader.uniforms,
+  vertexShader: GradeShader.vertexShader,
+  fragmentShader: GradeShader.fragmentShader
+    .replace('void main(){', `vec3 lRRT(vec3 v){ vec3 a = v * (v + 0.0245786) - 0.000090537; vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081; return a / b; }
+vec3 lACES(vec3 color){
+  const mat3 I = mat3(vec3(0.59719, 0.07600, 0.02840), vec3(0.35458, 0.90834, 0.13383), vec3(0.04823, 0.01566, 0.83777));
+  const mat3 O = mat3(vec3(1.60475, -0.10208, -0.00327), vec3(-0.53108, 1.10813, -0.07276), vec3(-0.07367, -0.00605, 1.07602));
+  color *= 1.0 / 0.6; color = I * color; color = lRRT(color); color = O * color; return clamp(color, 0.0, 1.0);
+}
+vec3 lOETF(vec3 v){ return mix(pow(v, vec3(0.41666)) * 1.055 - vec3(0.055), v * 12.92, vec3(lessThanEqual(v, vec3(0.0031308)))); }
+void main(){`)
+    .replace('gl_FragColor = vec4(max(c, 0.0), 1.0);', 'gl_FragColor = vec4(lOETF(lACES(max(c, 0.0))), 1.0);'),
+};
+
 export const TIERS = {
   low: { name: 'low', post: false, bloomHalf: true, shadows: false, grain: false, dpr: 1.0, detail: false, glintK: 0.7 },
-  med: { name: 'med', post: true, bloomHalf: true, shadows: false, grain: false, dpr: 1.25, detail: true, glintK: 1 },
+  med: { name: 'med', post: true, fused: true, bloomHalf: true, shadows: false, grain: false, dpr: 1.25, detail: true, glintK: 1 },
   high: { name: 'high', post: true, bloomHalf: false, shadows: true, grain: true, dpr: 1.5, detail: true, glintK: 1 },
 };
 const ORDER = ['low', 'med', 'high'];
@@ -56,6 +74,10 @@ export class Post {
     this.composer.addPass(this.bloom);
     this.composer.addPass(this.grade);
     this.composer.addPass(this.output);
+    this.gradeOut = new ShaderPass(GradeOutShader);
+    this.gradeOut.material.toneMapped = false;
+    // share the uniforms with the two-pass grade so tint / time set via post.grade apply to both
+    this.gradeOut.uniforms = this.gradeOut.material.uniforms = this.grade.uniforms;
     this.tier = null;
   }
   apply(tier, w, h, deviceDpr) {
@@ -80,6 +102,7 @@ export class Post {
     this.bloom.setSize(Math.round(w * dpr * bs), Math.round(h * dpr * bs));
     this.grade.uniforms.uGrain.value = T.grain ? 0.03 : 0;
     r.shadowMap.enabled = T.shadows;
+    this.composer.passes = T.fused ? [this.renderPass, this.bloom, this.gradeOut] : [this.renderPass, this.bloom, this.grade, this.output];
   }
   resize(w, h, deviceDpr) { if (this.tier) this.apply(this.tier.name, w, h, deviceDpr); }
   render(time) {
