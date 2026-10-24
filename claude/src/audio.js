@@ -354,12 +354,15 @@ export class Audio {
     const v = 1 + (Math.random() * 2 - 1) * 0.07, pan = this.gun ? 0.22 : -0.22;
     const o = { pan, verb: 0.22, echo: 0.3 };
     this.duck(0.35, 0.06);
-    this.noiseHit('highpass', 3200 * v, 0.9, 0.42, 0.028, 0, { ...o, attack: 0.0008 });              // crack
-    this.noiseHit('bandpass', 5200 * v, 3, 0.16, 0.05, 2400, { ...o, attack: 0.0008 });               // sizzle
-    this.tone('sine', 1750 * v, 520 * v, 0.07, 0.045, 0, { pan, attack: 0.001 });                     // signature chirp
-    this.tone('square', 880 * v, 330 * v, 0.03, 0.035, 0.004, { pan, attack: 0.001 });
-    this.tone('sine', 122 * v, 44, 0.5, 0.13, 0, { pan: pan * 0.4, attack: 0.002 });                  // thump
-    this.tone('triangle', 64 * v, 36, 0.22, 0.16, 0.003, { attack: 0.003 });                          // body
+    // round 23: deeper cannon — the hiss is cut way down, the weight sits in a 120→55 Hz pitch-drop thump plus a
+    // 160→80 Hz knock (the harmonic phone speakers can actually play) and a short low-mid punch; total level unchanged
+    this.noiseHit('highpass', 2600 * v, 0.8, 0.17, 0.02, 0, { ...o, attack: 0.0008 });               // crack (was 0.42)
+    this.noiseHit('bandpass', 3800 * v, 2.5, 0.05, 0.035, 2000, { ...o, attack: 0.0008 });            // sizzle (was 0.16)
+    this.noiseHit('lowpass', 700 * v, 1.1, 0.26, 0.045, 220, { pan, attack: 0.001, drive: true });    // low-mid punch
+    this.tone('sine', 1150 * v, 380 * v, 0.04, 0.035, 0, { pan, attack: 0.001 });                     // signature chirp (softer, lower)
+    this.tone('triangle', 165 * v, 80, 0.3, 0.07, 0, { pan: pan * 0.5, attack: 0.0015 });             // knock
+    this.tone('sine', 120 * v, 55, 0.62, 0.14, 0, { pan: pan * 0.4, attack: 0.002 });                 // thump: 120 -> 55 Hz drop
+    this.tone('triangle', 80 * v, 42, 0.28, 0.17, 0.004, { attack: 0.003 });                          // sub body
   }
   // heavy rocket: deep launch thump + rising whoosh + crackle
   rocket() {
@@ -421,6 +424,8 @@ export class Audio {
     this.tone('sine', 140, 50, 0.22, 0.25, 0, { pan, verb: 0.3 });
     this.tone('sawtooth', 500, 90, 0.05, 0.25, 0, { pan });
   }
+  // round 23: drone harassment shot — thin, bright-ish zip, much lighter than a turret
+  droneShot(pan = 0) { if (this.ctx) { this.tone('square', 1500, 600, 0.035, 0.09, 0, { pan, verb: 0.3 }); this.noiseHit('bandpass', 2200, 2, 0.05, 0.08, 900, { pan, verb: 0.3 }); } }
   lost() { this.tone('sine', 660, 330, 0.05, 0.6, 0, { ui: true }); }
   hit() { this.duck(0.5, 0.25); this.tone('sine', 90, 40, 0.5, 0.35); this.tone('triangle', 220, 140, 0.18, 0.25); this.noiseHit('bandpass', 700, 1.2, 0.35, 0.3, 0, { drive: true, verb: 0.2 }); }
   splash() { this.noiseHit('bandpass', 1400, 0.6, 0.45, 0.6, 400, { verb: 0.2 }); this.noiseHit('lowpass', 500, 0.7, 0.3, 0.4); this.tone('sine', 300, 90, 0.1, 0.25); }
@@ -431,6 +436,8 @@ export class Audio {
     for (let i = 0; i < 6; i++) this.tone('square', i % 2 ? 660 : 880, i % 2 ? 660 : 880, 0.05, 0.16, i * 0.2, { ui: true, attack: 0.005 });
     this.tone('sawtooth', 700, 50, 0.12, 1.4, 0, { verb: 0.4 }); this.tone('sine', 300, 30, 0.2, 1.6, 0.1);
   }
+  // round 23: hull grinding on the riverbed (underwater: dull, low)
+  scrape(k = 1) { if (this.ctx) { this.noiseHit('bandpass', 420, 1.4, 0.09 * k, 0.22, 180); this.tone('triangle', 75, 48, 0.05 * k, 0.16); } }
   dive() { this.tone('sine', 260, 120, 0.12, 0.3); this.noiseHit('lowpass', 1200, 1, 0.15, 0.25); }
   score() { this.tone('sine', 880, 1320, 0.06, 0.12, 0.05, { ui: true }); this.tone('sine', 1320, 1760, 0.04, 0.12, 0.12, { ui: true }); }
   // ---------------------------------------------------------------- round 4: naval layer

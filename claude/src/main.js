@@ -339,6 +339,10 @@ const UW_BOLT_SPEED = 260, UW_BOLT_LIFE = 0.28, UW_RANGE = UW_BOLT_SPEED * UW_BO
 // LETHE turret bolts
 // (round 4: the pool is shared with patrol-boat and hunter bolts; each bolt carries its speed, colour, damage, radius)
 const EB_SPEED = 165, EB_N = 32, EB_DMG = 9;
+// round 23: drone harassment fire — slow pale-cyan darts, mostly unled so a sidestep dodges them; shields soak them first
+const DR_DMG = 3, DR_SPEED = 85, DR_GAP = 3.4, DR_FIRST = 1.6, DR_RANGE = 200, DR_LEAD = 0.35, DR_RAD = 2.3;
+const DR_TUT_DMG = 1.5, DR_TUT_SPEED = 65, DR_TUT_GAP = 5.5;   // zone 0 (the drones-only tutorial stretch)
+const EB_DRONE = [1.2, 2.0, 2.3];
 const EB_RED = [2.4, 0.3, 0.15], EB_BLUE = [0.7, 1.3, 2.6], EB_CYAN = [0.3, 1.8, 1.9];
 const ebolts = [];
 for (let i = 0; i < EB_N; i++) ebolts.push({ on: false, p: new THREE.Vector3(), q: new THREE.Vector3(), o: new THREE.Vector3(), d: new THREE.Vector3(), life: 0, s: 0,
@@ -391,7 +395,7 @@ let G;
 function freshState() {
   return {
     phase: 'start', t: 0, s: PAD_A, lat: 0, y: PAD_TOP + 1.7, vLat: 0, vY: 0, speed: 0, boost: 0,
-    cargo: 100, health: 100, air: 60, score: 0, dive: false, underwater: false, hitCd: 0, rad: 0,
+    cargo: 100, health: 100, air: 60, score: 0, dive: false, underwater: false, hitCd: 0, rad: 0, bedHits: 0, bedScrapes: 0, bedT: -9,
     yaw: 0, pitch: 0, roll: 0, phaseT: 0, fireCd: 0, gun: 0, shake: 0, hitFlash: 0,
     kills: 0, mastsBroken: 0, outcome: null, reason: '', finalScore: 0, wasUnder: false, lastZone: null,
     msgT: 0, popT: 0, beepT: 0, airOut: false, toastT: 0, toastQ: [], seen: {}, rkLog: [], turretHinted: false, legendT: 20,
@@ -399,7 +403,7 @@ function freshState() {
     mark: 0, spotters: 0, markBeep: 0, lock: { phase: 'none', t: 0, turret: null, shots: 0 }, droneHinted: false, lostSaid: false,
     turretShotsFired: 0, turretHits: 0, ebLog: [], turretKills: 0, apDiveT: 0, muzzleT: 0,
     rockets: ROCKET_AMMO, rocketCd: 0, rocketsFired: 0, recoilT: 9, dip: 0, kick: 0, jolt: 0, micro: 0,
-    mineKills: 0, mineHits: 0, hunterKills: 0, hunterRams: 0, hunterShots: 0, boatKills: 0, navalHits: 0, boatShots: 0, ricochets: 0, armorT: 0,
+    mineKills: 0, mineHits: 0, hunterKills: 0, hunterRams: 0, hunterShots: 0, boatKills: 0, droneShots: 0, droneHits: 0, droneDmg: 0, navalHits: 0, boatShots: 0, ricochets: 0, armorT: 0,
     mineHinted: false, hunterHinted: false, boatHinted: false,
     relayKills: 0, relayHinted: false, blindSaid: false, noRelay: false, blockLogged: false, lockLog: [], beamSegs: 0, beamTurret: -1, markPings: 0,
     waterBurned: 0, waterSpilled: 0, burnRate: 0, thinAir: false, steam: 0, burnHinted: false, thinHinted: false,
@@ -741,6 +745,7 @@ function updateFlight(dt) {
       if (G.y < -8.5) { G.y = -8.5; G.vY = Math.max(G.vY, 0); }
       if (G.dive && G.y < -1.8 && G.y > -2.4 && G.vY > 0) { G.y = -2.4; G.vY = 0; }
     }
+    collideBed(dt);   // round 23
     if (!G.dive && G.y > 0.9) {
       const minY = Math.max(1.2, bankY(G.s, G.lat) + 1.7);
       if (G.y < minY) { G.y = minY; G.vY = Math.max(0, G.vY); }
@@ -750,6 +755,62 @@ function updateFlight(dt) {
     if (Math.abs(G.s - GATE_S) < 8 && G.y > GATE_BEAM - 6) { G.y = GATE_BEAM - 6; G.vY = Math.min(G.vY, 0); }
   }
   collide(dt);
+}
+
+// round 23: the hull vs the riverbed and the sloped sides of the underwater channel. The ship body is ~11 m wide
+// (wing tips) and reaches ~2 m below its centre; the hull is approximated by a half-ellipse sampled across the
+// wings and at nose / centre / tail, tested against bedY (which matches the terrain cross-section).
+const HULL_HW = 5.2, HULL_HH = 2.0, HULL_K = [-1, -0.66, -0.33, 0, 0.33, 0.66, 1], HULL_DS = [-6, 0, 6];
+function hullFloor(s, lat) {
+  let f = -1e9;
+  for (const ds of HULL_DS) for (const k of HULL_K) {
+    const y = bedY(s + ds, lat + k * HULL_HW) + HULL_HH * Math.sqrt(1 - k * k * 0.88);
+    if (y > f) f = y;
+  }
+  return f;
+}
+// lowest hull point vs the bed under it (negative = inside rock); test probe and regression metric
+function hullClear(s, lat, y) {
+  let c = 1e9;
+  for (const ds of HULL_DS) for (const k of HULL_K) c = Math.min(c, y - HULL_HH * Math.sqrt(1 - k * k * 0.88) - bedY(s + ds, lat + k * HULL_HW));
+  return c;
+}
+function collideBed(dt) {
+  if (G.y > 0.5) return;
+  const f = hullFloor(G.s, G.lat);
+  if (G.y >= f) return;
+  // slope of the floor across the channel: steep sides push sideways, the flat bed lifts
+  const g = (hullFloor(G.s, G.lat + 0.5) - hullFloor(G.s, G.lat - 0.5));
+  const n2 = 1 + g * g, inv = 1 / Math.sqrt(n2), nl = -g * inv, ny = inv;
+  const pen = f - G.y;
+  G.lat += -g * pen / n2; G.y += pen / n2;
+  const f2 = hullFloor(G.s, G.lat);
+  if (G.y < f2) G.y = f2;   // hard guarantee: never inside rock
+  const vn = G.vLat * nl + G.vY * ny;
+  // the player's own descent counts half (settling onto the bed is a scrape); hitting a slope sideways is a crash
+  const hard = Math.max(0, -(G.vLat * nl + G.vY * ny * (G.vY < 0 ? 0.5 : 1)));
+  if (vn < 0) { G.vLat -= vn * nl * 1.25; G.vY -= vn * ny * 1.25; }
+  if (G.phase !== 'flight') return;
+  G.bedT = G.t;
+  // contact point: on the hull, toward the rock
+  frame(G.s, SF);
+  V1.copy(shipPos).addScaledVector(V2.set(SF.rx, 0, SF.rz), -nl * HULL_HW * 0.8); V1.y -= ny * HULL_HH * 0.8;
+  if (hard > 4.5) {
+    // same feedback as a canyon wall above water (damage, shake, sparks, speed loss) and a push off the rock
+    G.bedHits++;
+    hitCargo(clamp(2 + hard * 0.5 + G.speed * 0.03, 2, 8), V1.clone());
+    G.vLat += nl * 4; G.vY += ny * 4;
+  } else {
+    // grazing: a silt puff, grinding shake and drag, no damage
+    G.speed *= Math.exp(-dt * 1.2);
+    G.micro = Math.max(G.micro, 0.25);
+    G.bedScrapeCd = (G.bedScrapeCd || 0) - dt;
+    if (G.bedScrapeCd <= 0) {
+      G.bedScrapeCd = 0.3; G.bedScrapes++;
+      for (let i = 0; i < 4; i++) mist.emit(V1.x, V1.y, V1.z, (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 1.5, 3, 6, 0.32, 0.27, 0.2, 0.45, -0.2, 0.6);
+      audio.scrape?.(Math.min(1, 0.4 + G.speed / 40));
+    }
+  }
 }
 
 function collide(dt) {
@@ -1338,6 +1399,30 @@ function fireTurret(t, target, accurate) {
   lightFlash(t.muzzle, 160, 0.12, 1, 0.25, 0.15);
   audio.turretShot(panOf(t.muzzle) * 0.8);
 }
+// round 23: a spotting drone takes a light pot-shot every few seconds (none while a turret lock is in progress)
+function droneFire(d, dt) {
+  if (d.fireT === undefined) d.fireT = DR_FIRST;
+  d.fireT -= dt;
+  if (d.fireT > 0) return;
+  const tut = zoneAt(d.s)?.idx === 0;
+  d.fireT = (tut ? DR_TUT_GAP : DR_GAP) * (0.85 + Math.random() * 0.3);
+  const L = G.lock;
+  if (L.phase === 'laser' || L.phase === 'volley' || G.y < 0.5) return;
+  if (d.wp.distanceTo(shipPos) > DR_RANGE) return;
+  const sp = tut ? DR_TUT_SPEED : DR_SPEED;
+  // leads the ship's run down the canyon fully, but only DR_LEAD of its sideways / vertical drift -> a sidestep dodges it
+  let tf = d.wp.distanceTo(shipPos) / sp;
+  for (let k = 0; k < 3; k++) {
+    toWorld(G.s + G.speed * tf, G.lat + G.vLat * tf * DR_LEAD, Math.max(1.2, G.y + G.vY * tf * DR_LEAD), V4);
+    tf = d.wp.distanceTo(V4) / sp;
+  }
+  const b = enemyBolt(d.wp, V4, d.s, sp, EB_DRONE, tut ? DR_TUT_DMG : DR_DMG, DR_RAD, 'drone', false, 3.2);
+  if (!b) return;
+  b.drone = d; d.shots = (d.shots || 0) + 1;
+  G.droneShots++;
+  glows.add(d.wp.x, d.wp.y, d.wp.z, 1.2, 2, 2.3, 1, 5);
+  audio.droneShot?.(panOf(d.wp) * 0.8);
+}
 // predict where the ship will be along the (curving) canyon when the bolt arrives
 function leadTarget(from, out, sp = EB_SPEED, under = false) {
   let tf = from.distanceTo(shipPos) / sp;
@@ -1363,6 +1448,7 @@ function updateLethe(dt, time) {
     if (!lineOfSight(d.wp, shipPos, d.s)) continue;
     d.spotting = true;
     G.spotters++;
+    droneFire(d, dt);
     threat(d, d.wp);
     if (!G.droneHinted && !introArmed('drone')) {   // round 17: the intro prompt replaces this toast while armed
       G.droneHinted = true;
@@ -1380,6 +1466,7 @@ function updateLethe(dt, time) {
     }
   }
   for (let i = nb; i < brackets.length; i++) brackets[i].style.display = 'none';
+  for (const d of DRONES) if (!d.spotting) d.fireT = DR_FIRST;   // losing sight re-arms the warm-up
   // --- relays (round 5): the mark reaches the turrets only through a live relay of the ship's section
   for (const t of TURRETS) t.blind = !zoneLinked(t.zone);
   const shipZone = zoneAt(G.s);
@@ -1497,12 +1584,13 @@ function updateLethe(dt, time) {
     b.minD = Math.min(b.minD, b.p.distanceTo(shipPos));
     let dead = b.life <= 0;
     if (!dead && G.phase !== 'result' && segSphere(b.q, b.p, shipPos, b.rad)) {
-      if (b.src === 'turret') G.turretHits++; else G.navalHits++;
+      if (b.src === 'turret') G.turretHits++; else if (b.src === 'drone') { G.droneHits++; G.droneDmg += b.dmg; if (b.drone) { b.drone.hits = (b.drone.hits || 0) + 1; b.drone.dmg = (b.drone.dmg || 0) + b.dmg; } } else G.navalHits++;
       if (b.src === 'punish') { PUN.hits++; PUN.dmg += b.dmg; if (b.punRec) { b.punRec.hits++; b.punRec.dmg += b.dmg; } }
       const through = damage(b.dmg, b.p.clone(), 'bolt');
-      G.shake = Math.min(1.4, G.shake + 0.45);
-      sparkBurst(b.p, 18, through > 0 ? [1.8, 0.9, 0.4] : [0.6, 1.5, 2]);
-      explodeSmall(b.p);
+      const light = b.src === 'drone';
+      G.shake = Math.min(1.4, G.shake + (light ? 0.12 : 0.45));
+      sparkBurst(b.p, light ? 7 : 18, through > 0 ? [1.8, 0.9, 0.4] : [0.6, 1.5, 2]);
+      if (!light) explodeSmall(b.p);
       dead = true;
     }
     if (!dead && b.life < b.life0 - 0.1) { dead = b.under ? uwBoltWorld(b) : boltWorldHit(b); if (dead) b.why = 'world'; }
@@ -2622,7 +2710,7 @@ function respawn() {
   G.phase = 'flight'; G.phaseT = 0; G.outcome = null; G.reason = ''; G.respawn = false;
   G.s = c; G.lat = 0; G.y = 12; G.vY = 0; G.vLat = 0; G.speed = 45; G.boost = 0;
   G.dive = false; G.underwater = false; G.wasUnder = false; G.air = 60; G.airOut = false; G.dip = 0; G.apDiveT = 0;
-  G.yaw = 0; G.pitch = 0; G.roll = 0; G.hitCd = 0; G.rad = 0;
+  G.yaw = 0; G.pitch = 0; G.roll = 0; G.hitCd = 0; G.rad = 0; G.bedHits = 0; G.bedScrapes = 0;
   G.cargo = Math.max(snap.cargo, 40); G.health = Math.max(snap.health, 60); G.shield = Math.max(snap.shield, SHIELD_MAX * 0.5); G.rockets = Math.max(snap.rockets, 2);
   disp.cargo = disp.gc = G.cargo;
   G.invuln = 3;
@@ -3063,7 +3151,15 @@ function updateCamera(dt, time) {
   let lat = cl + camLatAdj;
   lat = clamp(lat, -(wallLat(cs, cy, -1) - 1.5), wallLat(cs, cy, 1) - 1.5);   // hard guarantee
   toWorld(cs, lat, camPos.y, camPos);
-  if (G.y < -0.6) camPos.y = clamp(camPos.y, bedY(cs, lat) + 1.2, -1.1);
+  if (G.y < -0.6) {
+    // round 23: underwater the camera stays over the deep part of the channel (never in the sloped sides) and above the
+    // bed with a margin around it (the near plane spans ~1 m)
+    const wl = riverHalf(cs) * 0.86 - 1;
+    if (Math.abs(lat) > wl) { lat = Math.sign(lat) * wl; toWorld(cs, lat, camPos.y, camPos); }
+    let fl = -1e9;
+    for (const dl of [-1.5, 0, 1.5]) for (const ds of [-1.5, 1.5]) fl = Math.max(fl, bedY(cs + ds, lat + dl));
+    camPos.y = clamp(camPos.y, fl + 1.3, -1.1);
+  }
   else if (G.y > 0.3) camPos.y = Math.max(camPos.y, 1.0 + Math.max(0, bankY(cs, lat)));
   camera.position.copy(camPos);
   // shake
@@ -3516,11 +3612,33 @@ function startGame() {
   G.phase = 'takeoff'; G.phaseT = 0; G.t = 0;
   showMsg('TAKEOFF — SETTLEMENT A', 'ВЗЛЁТ — ПОСЕЛЕНИЕ А', 2.2);
 }
-$('start').addEventListener('click', () => {
+// round 23: fullscreen (hides the Android Chrome address bar) + landscape lock where supported; silent no-op on iPhone
+const fsRoot = document.documentElement;
+const fsCan = !!(fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen) && (document.fullscreenEnabled ?? document.webkitFullscreenEnabled ?? true) !== false;
+const fsActive = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+function goFullscreen() {
+  if (!fsCan || fsActive()) return;
   try {
-    const el = document.documentElement;
-    if (isTouch && el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen({ navigationUI: 'hide' }).then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
+    const p = fsRoot.requestFullscreen ? fsRoot.requestFullscreen({ navigationUI: 'hide' }) : fsRoot.webkitRequestFullscreen();
+    Promise.resolve(p).then(() => screen.orientation?.lock?.('landscape')?.catch?.(() => {})).catch(() => {});
   } catch (e) { /* ignore */ }
+}
+function syncFs() {
+  let app = false;
+  try { app = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches; } catch (e) { /* ignore */ }
+  document.body.classList.toggle('fs-on', fsActive() || app);
+  $('fsBtn')?.classList.toggle('hide', !fsCan);
+}
+$('fsBtn')?.addEventListener('click', (e) => { e.stopPropagation(); goFullscreen(); });
+document.addEventListener('fullscreenchange', syncFs);
+document.addEventListener('webkitfullscreenchange', syncFs);
+syncFs();
+// compact menu: rules / keys / tips live behind HOW TO PLAY; any tap while it is open just closes it
+$('helpBtn')?.addEventListener('click', (e) => { e.stopPropagation(); $('start')?.classList.toggle('help'); });
+$('start').addEventListener('click', () => {
+  const st = $('start');
+  if (st.classList.contains('help')) { st.classList.remove('help'); return; }
+  if (isTouch) goFullscreen();
   startGame();
 });
 $('retry').addEventListener('click', (e) => { e.stopPropagation(); reset(); startGame(); });
@@ -3999,7 +4117,7 @@ window.__lethe = {
     hunters: { alive: HUNTERS.filter((h) => h.alive).length, killed: G.hunterKills, rams: G.hunterRams, shots: G.hunterShots, hunting: HUNTERS.filter((h) => h.alive && h.mode === 'hunt').length,
       visible: HUNTERS.filter((h) => h.alive && h.vis && h.wp.distanceTo(shipPos) < 120).length },
     boats: { alive: BOATS.filter((b) => b.alive).length, killed: G.boatKills, shots: G.boatShots, ricochets: G.ricochets },
-    navalHits: G.navalHits, threats: thrShown, markerKinds: tgtEls.filter((m) => m.el.style.display === 'block').map((m) => m.kind),
+    navalHits: G.navalHits, droneShots: G.droneShots, droneHits: G.droneHits, droneDmg: G.droneDmg, threats: thrShown, markerKinds: tgtEls.filter((m) => m.el.style.display === 'block').map((m) => m.kind),
     markers: tgtEls.filter((m) => m.el.style.display === 'block').length, legend: hud.keys.classList.contains('on'),
     shield: +G.shield.toFixed(1), mark: +G.mark.toFixed(3), spotters: G.spotters, lock: G.lock.phase,
     turretShotsFired: G.turretShotsFired, ebLog: G.ebLog.slice(-6), rkLog: G.rkLog.slice(-4), turretHits: G.turretHits, quality, fps: Math.round(fps),
@@ -4063,6 +4181,8 @@ window.__lethe = {
       return DRONES.indexOf(d);
     },
     forceMark: (v = 1) => { G.mark = v; },
+    setSpeed: (v) => { G.speed = v; },
+    droneStats: (i) => { const d = DRONES[i]; return d ? { shots: d.shots || 0, hits: d.hits || 0, dmg: d.dmg || 0, zone: zoneAt(d.s)?.idx ?? -1 } : null; },
     // round 5 relays: list (with the turrets each one links) and kill one (as if shot: score, toasts)
     relays: () => BEACONS.map((b, i) => ({ i, s: +b.s.toFixed(0), zone: b.zone.idx, alive: b.alive, side: b.side,
       turrets: TURRETS.map((t, k) => (t.zone === b.zone ? k : -1)).filter((k) => k >= 0) })),
@@ -4193,6 +4313,13 @@ window.__lethe = {
       return { n, cyan, laser, laserRGB, markPings: G.markPings, spotters: G.spotters, underwater: G.underwater, camUnder, lock: G.lock.phase, mark: +G.mark.toFixed(3), frozen };
     },
     shipCam: () => ({ ship: shipPos.toArray(), cam: camera.position.toArray() }),
+    refill: () => { G.air = 60; G.airOut = false; G.cargo = 100; G.health = 100; G.shield = SHIELD_MAX; disp.cargo = disp.gc = 100; },
+    // round 23: hull / camera clearance to the riverbed (m; negative = inside rock)
+    bedProbe: () => {
+      const pr = projectToPath(camera.position.x, camera.position.z, G.s - 20);
+      return { hull: +hullClear(G.s, G.lat, G.y).toFixed(2), cam: +(camera.position.y - bedY(pr.s, pr.lat)).toFixed(2), camLat: +pr.lat.toFixed(2), camY: +camera.position.y.toFixed(2),
+        s: +G.s.toFixed(1), lat: +G.lat.toFixed(2), y: +G.y.toFixed(2), wr: +riverHalf(G.s).toFixed(1), hits: G.bedHits, scrapes: G.bedScrapes };
+    },
   },
 };
 

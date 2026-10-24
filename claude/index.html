@@ -8,6 +8,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>LETHE · ЛЕТА — Delivery</title>
 <link rel="icon" href="data:,">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <style>
   :root{--sl:env(safe-area-inset-left,0px);--sr:env(safe-area-inset-right,0px);--st:env(safe-area-inset-top,0px);--sb:env(safe-area-inset-bottom,0px);
     --ink:#f2ebe2;--dim:rgba(242,235,226,.62);--amber:#ffb36b;--teal:#8fe9dc;--cyan:#7fe6ff;--red:#ff5a44;--line:rgba(255,236,214,.16)}
@@ -368,6 +370,41 @@
     .edition{bottom:calc(16px + var(--sb))}
     #stats{margin:12px 0 14px;gap:8px 26px} #stats b{font-size:19px}
   }
+  /* round 23: menu buttons (fullscreen, how-to-play) + compact start menu for short landscape screens (browser chrome) */
+  .grp{display:contents}
+  button.mini{font:inherit;font-size:9px;letter-spacing:.2em;color:var(--ink);background:rgba(20,10,8,.45);border:1px solid var(--line);border-radius:3px;padding:5px 10px 4px;cursor:pointer;pointer-events:auto;line-height:1.2}
+  button.mini small{font-size:7.5px;opacity:.6;letter-spacing:.1em}
+  button.mini:hover{border-color:var(--amber)}
+  #helpBtn{display:none;margin-top:12px}
+  #fsBtn{position:absolute;top:calc(10px + var(--st));right:calc(12px + var(--sr));z-index:2}
+  #fsBtn.hide,.fs-on #fsBtn{display:none}
+  @media (max-height:430px) and (orientation:landscape){
+    .ed{grid-template-columns:.74fr 1.26fr;gap:3%;align-items:center;overflow-y:auto;overscroll-behavior:contain;
+      padding:calc(8px + var(--st)) calc(4% + var(--sr)) calc(8px + var(--sb)) calc(5% + var(--sl))}
+    .ed>div:first-child{align-self:start;padding-top:18px}
+    .eyebrow{font-size:8px;letter-spacing:.26em}
+    h1{font-size:clamp(36px,6.2vw,62px);margin-top:10px;letter-spacing:.16em} h1 span{margin-top:8px;font-size:9px;letter-spacing:1em}
+    .edition{display:none}
+    #helpBtn{display:inline-block}
+    .intro .flight{font-size:8.5px;letter-spacing:.3em}
+    .intro h2{font-size:21px;margin:2px 0 1px} .intro p{font-size:10px;line-height:1.4}
+    .facts{margin:4px 0 6px;gap:12px;font-size:7.5px}
+    .primary{padding:9px 16px;font-size:10px;width:min(100%,330px)} .primary small{margin-top:1px}
+    .helpbox{display:none}
+    #start.help .helpbox{display:block;position:fixed;z-index:3;left:calc(4% + var(--sl));top:calc(8px + var(--st));max-height:calc(100% - 16px - var(--st) - var(--sb));width:min(37%,400px);
+      overflow-y:auto;background:rgba(14,9,7,.95);border:1px solid var(--line);border-radius:4px;padding:10px 14px}
+    #start.help .helpbox .legend,#start.help .helpbox .instr{margin-top:0} #start.help .helpbox .instr{font-size:9.5px;line-height:1.55}
+    .sets{display:grid;grid-template-columns:auto auto;justify-content:start;gap:5px 14px;margin-top:7px}
+    .sets .eng{display:contents}
+    .grp,#tipsSel,#musSel{display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:0}
+    #musSel{order:4} #styleSel .grp{order:3}
+    .eng .engL{font-size:7.5px;letter-spacing:.14em}
+    .seg button{font-size:9px;padding:5px 8px 4px} .seg button small{font-size:7px}
+    #styleSel .seg button{min-width:46px}
+    #styleSel .lx{display:none}
+    #fsBtn{top:calc(6px + var(--st));right:calc(8px + var(--sr));padding:4px 8px 3px}
+  }
+  @media (max-height:330px) and (orientation:landscape){ .intro p{display:none} .intro h2{font-size:18px} h1{margin-top:6px} }
 </style>
 <script type="importmap">{"imports":{"three":"./lib/three.module.min.js","three/addons/":"./lib/addons/"}}</script>
 </head>
@@ -446,6 +483,7 @@
     <div>
       <div class="eyebrow">A WATER CHARTER STORY · ВОДНАЯ ХАРТИЯ</div>
       <h1>LETHE<span>ЛЕТА</span></h1>
+      <button type="button" class="mini" id="helpBtn">HOW TO PLAY <small>КАК ИГРАТЬ</small></button>
     </div>
     <div class="intro">
       <div class="flight">FLIGHT 01 · РЕЙС 01</div>
@@ -453,6 +491,7 @@
       <p>Two suns. One river. A settlement running dry.<br>Bring the water home. <span style="opacity:.6">/ Доставьте воду в посёлок Б.</span></p>
       <div class="facts"><span>8.0 KM <i>MELAS CANYON</i></span><span>6 000 L <i>FRESH WATER</i></span><span>≈ 2:36 <i>FLIGHT</i></span></div>
       <button class="primary" id="startBtn"><span>BEGIN DELIVERY<small>НАЧАТЬ РЕЙС</small></span><span>↗</span></button>
+      <div class="helpbox" id="helpBox">
       <div class="legend">
         <span><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> steer · climb</span><span><kbd>Shift</kbd> boost</span>
         <span><kbd>Space</kbd> / <kbd>LMB</kbd> fire cannons</span><span><kbd>E</kbd> <kbd>C</kbd> <kbd>Q</kbd> dive / surface</span>
@@ -462,13 +501,17 @@
         <span class="tonly"><b>Left thumb</b> stick · <b>FIRE</b> / <b>BOOST</b> hold · <b>ROCKET</b> / <b>DIVE</b> tap · <b>TILT</b> gyro · ⚙ engine<br></span>
         <span class="tg">Amber brackets</span> = targets. Drones mark you, <b>relays</b> pass it to rim turrets — down a relay, the sector goes blind. <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water hides you — mines and hunters wait below.
       </div>
-      <div class="eng" id="engSel"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div>
+      <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive. A boat's scan beam damps your engines — dive, then kill it from below.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй. Луч катера глушит двигатели — нырни и бей снизу.</i></div>
+      </div>
+      <div class="sets">
+      <div class="eng" id="engSel"><span class="grp" id="engGrp"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div></span>
         <span id="tipsSel"><span class="engL">TIPS <i>/ ПОДСКАЗКИ</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span>
         <span id="musSel"><span class="engL">MUSIC <i>/ МУЗЫКА</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span></div>
-      <div class="eng" id="styleSel"><span class="engL"><b class="lx">MUSIC </b>STYLE <i>/ СТИЛЬ<b class="lx"> МУЗЫКИ</b></i></span><div class="seg"></div></div>
-      <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive. A boat's scan beam damps your engines — dive, then kill it from below.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй. Луч катера глушит двигатели — нырни и бей снизу.</i></div>
+      <div class="eng" id="styleSel"><span class="grp" id="styleGrp"><span class="engL"><b class="lx">MUSIC </b>STYLE <i>/ СТИЛЬ<b class="lx"> МУЗЫКИ</b></i></span><div class="seg"></div></span></div>
+      </div>
     </div>
   </div>
+  <button type="button" class="mini" id="fsBtn">⛶ FULLSCREEN <small>ПОЛНЫЙ ЭКРАН</small></button>
   <div class="edition">CORMORANT / БАКЛАН<span>AMPHIBIOUS WATER COURIER</span></div>
 </div>
 
