@@ -576,7 +576,7 @@ function fail(en, ru) {
   G.dive = false;
   G.deaths++;
   G.respawn = CP_ON;   // round 18: respawn at the last checkpoint instead of ending the mission
-  if (G.respawn) showMsg(`SHIP DOWN — ${en}`, `КОРАБЛЬ ПОДБИТ — ${ru}`, 2.2, '#ff7a5a');
+  if (G.respawn) showMsg(`SHIP CRASHED — ${en}`, `КОРАБЛЬ РАЗБИТ — ${ru}`, 2.2, '#ff7a5a');
   else showMsg('MISSION FAILED', 'МИССИЯ ПРОВАЛЕНА', 3, '#ff7a5a');
   explode(shipPos, 0.8);
   audio.explosion(1.2, 1);
@@ -2668,9 +2668,9 @@ function updateGate(dt, time) {
 }
 
 // ------------------------------------------------------------------ round 18: checkpoints + respawn
-// Passing a checkpoint stores cargo / health / shield / rockets. On death the ship respawns there after ~2 s with at
+// Passing a checkpoint stores cargo / health / shield / rockets. On a crash the ship respawns there after ~2 s with at
 // least 40 % cargo and 60 % health, full air and ~3 s of protection. Everything already destroyed stays destroyed
-// (incl. gate generators); deaths are counted on the result screen. ?cp=0 restores the old "death ends the run".
+// (incl. gate generators); crashes are counted on the result screen. ?cp=0 restores the old "crash ends the run".
 const cpTicks = CHECKPOINTS.map((c, i) => (i ? routeTick(c, 'cp', `CHECKPOINT ${i}`) : null));
 const CP_N = CHECKPOINTS.length - 1;
 function cpSnapshot() { return { cargo: G.cargo, health: G.health, shield: G.shield, rockets: G.rockets }; }
