@@ -4,17 +4,9 @@
 //   pre-master -> bus compressor -> volume -> limiter -> destination
 const LS_KEY = 'lethe.audio', LS_ENGINE = 'lethe.engine', LS_MUSIC = 'lethe.music', LS_STYLE = 'lethe.musicStyle';
 // round 22: music styles (start-screen selector, ?style=); proc = the round 19 procedural synth score
-export const MUSIC_STYLES = [
-  { id: 'chinese', en: 'CHINESE', ru: 'КИТАЙ' },
-  { id: 'electro', en: 'ELECTRO', ru: 'ЭЛЕКТРО' },
-  { id: 'rock', en: 'ROCK', ru: 'РОК' },
-  { id: 'proc', en: 'SYNTH', ru: 'СИНТ' },
-];
-export const ENGINES = [
-  { id: 'whisper', en: 'Jet whisper', ru: 'Шёпот' },
-  { id: 'turbine', en: 'Turbine', ru: 'Турбина' },
-  { id: 'ion', en: 'Ion hum', ru: 'Ионный гул' },
-];
+// round 25: display names live in the i18n dictionaries (src/lang/*.js) as style.<id> / eng.<id>
+export const MUSIC_STYLES = [{ id: 'chinese' }, { id: 'electro' }, { id: 'rock' }, { id: 'proc' }];
+export const ENGINES = [{ id: 'whisper' }, { id: 'turbine' }, { id: 'ion' }];
 const ENGINE_ALIASES = { whisper: 'whisper', 'jet whisper': 'whisper', jet: 'whisper', turbine: 'turbine', ion: 'ion', 'ion hum': 'ion' };
 
 export class Audio {

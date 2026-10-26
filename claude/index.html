@@ -6,16 +6,24 @@
 <meta name="theme-color" content="#1c120e">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>LETHE · ЛЕТА — Delivery</title>
+<title>LETHE — Delivery</title>
 <link rel="icon" href="data:,">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <style>
   :root{--sl:env(safe-area-inset-left,0px);--sr:env(safe-area-inset-right,0px);--st:env(safe-area-inset-top,0px);--sb:env(safe-area-inset-bottom,0px);
-    --ink:#f2ebe2;--dim:rgba(242,235,226,.62);--amber:#ffb36b;--teal:#8fe9dc;--cyan:#7fe6ff;--red:#ff5a44;--line:rgba(255,236,214,.16)}
+    --ink:#f2ebe2;--dim:rgba(242,235,226,.62);--amber:#ffb36b;--teal:#8fe9dc;--cyan:#7fe6ff;--red:#ff5a44;--line:rgba(255,236,214,.16);
+    /* round 25: system fonts only — CJK / Hangul / Devanagari fall through to whatever the OS ships */
+    --latin:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,"Helvetica Neue",Arial;
+    --cjk:"Noto Sans CJK SC","PingFang SC","Hiragino Sans","Microsoft YaHei","Noto Sans JP","Yu Gothic","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans Devanagari","Nirmala UI","Mangal";
+    --font:var(--latin),var(--cjk),sans-serif}
+  html[lang=zh-Hans]{--font:var(--latin),"Noto Sans CJK SC","PingFang SC","Microsoft YaHei","Source Han Sans SC",var(--cjk),sans-serif}
+  html[lang=ja]{--font:var(--latin),"Noto Sans CJK JP","Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo","Noto Sans JP",var(--cjk),sans-serif}
+  html[lang=ko]{--font:var(--latin),"Noto Sans CJK KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",var(--cjk),sans-serif}
+  html[lang=hi]{--font:var(--latin),"Noto Sans Devanagari","Kohinoor Devanagari","Nirmala UI","Mangal",var(--cjk),sans-serif}
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{width:100%;height:100%;overflow:hidden;background:#1b0f0b;color:var(--ink);
-    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-weight:400;
+    font-family:var(--font);font-weight:400;
     -webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none;-webkit-tap-highlight-color:transparent}
   canvas{display:block;position:fixed;inset:0;width:100%;height:100%;outline:none}
   .ov{position:fixed;inset:0;pointer-events:none}
@@ -50,7 +58,7 @@
   .row.regen .lbl span{color:var(--cyan)}
   .row.down .lbl b{color:var(--red)}
   /* round 6: water burn — steam-white tag under the cargo bar (space reserved, so the panel never jumps) */
-  #burnTag{height:20px;margin-top:3px;font-size:8.5px;font-weight:600;letter-spacing:.16em;line-height:1.15;color:#e8f4ff;white-space:nowrap;
+  #burnTag{height:20px;margin-top:3px;font-size:8.5px;font-weight:600;letter-spacing:.16em;line-height:1.15;color:#e8f4ff;overflow:hidden;
     text-shadow:0 0 6px rgba(160,225,255,.7);opacity:0;transition:opacity .3s}
   #burnTag i{display:block;font-style:normal;font-weight:400;font-size:7.5px;letter-spacing:.12em;color:rgba(200,238,255,.72)}
   #rCargoRow.burn #burnTag{opacity:1;animation:burnP 1.1s ease-in-out infinite}
@@ -88,7 +96,7 @@
   #bAir>div.v{background:linear-gradient(90deg,#3ee8e0,#c0fff8)}
   #airBox.low #bAir>div.v{background:linear-gradient(90deg,#f42,#fa6)}
   #msg{position:absolute;left:50%;top:max(calc(118px + var(--st)),21%);transform:translate(-50%,0);text-align:center;font-size:17px;font-weight:300;letter-spacing:.32em;
-    opacity:0;transition:opacity .35s,transform .35s;white-space:nowrap}
+    opacity:0;transition:opacity .35s,transform .35s;width:max-content;max-width:calc(94vw - var(--sl) - var(--sr));line-height:1.3}
   #msg small{display:block;font-size:10px;opacity:.7;font-weight:400;letter-spacing:.24em;margin-top:5px}
   #toast{position:absolute;left:50%;top:calc(64px + var(--st));transform:translate(-50%,-8px);max-width:min(62vw,620px);text-align:center;font-size:11px;letter-spacing:.08em;
     line-height:1.5;padding:7px 14px;border-left:2px solid var(--red);background:linear-gradient(90deg,rgba(20,8,6,.72),rgba(20,8,6,.35));opacity:0;transition:opacity .6s ease,transform .6s ease}
@@ -142,6 +150,9 @@
   @keyframes tutUp{0%,100%{transform:translateY(2px);opacity:.6}50%{transform:translateY(-2px);opacity:1}}
   @keyframes tutKey{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
   body.tutorial #toast{opacity:0}
+  /* round 25: translated prompt lines can be long (FR / DE / HI) — titles stay on one line, the explanation wraps */
+  #intro .tx{white-space:normal;width:max-content;max-width:min(86vw,600px);margin-left:auto;margin-right:auto} #tut .tx{white-space:normal;max-width:min(calc(86vw - 150px),460px)}
+  #intro .tl,#tut .tl{max-width:94vw;white-space:normal}
   @media (max-height:500px){ #tut{top:calc(56px + var(--st));padding:8px 22px 10px} #tut .tl{font-size:30px} #tut .te{font-size:12px;margin-top:2px}
     #tut .tr{margin-top:4px;gap:10px} #tut svg{width:96px;height:32px} #tut .tk{font-size:12px} #tut .tc{margin-top:2px;font-size:10px} #tut .tc i{font-size:9px} }
   #btnDive.pulse{border-color:#8ff4ea;border-width:2px;background:rgba(40,190,180,.45);animation:diveGlow .9s ease-in-out infinite}
@@ -202,6 +213,8 @@
   #btnRocket.cd{border-color:rgba(255,190,90,.3)}
   #btnTilt{right:calc(216px + var(--sr));bottom:calc(30px + var(--sb));width:auto;height:24px;border-radius:12px;padding:0 10px;font-size:9px;flex-direction:row;gap:5px}
   #btnTilt small{margin:0}
+  /* round 25: one-language labels can be longer (ФОРСАЖ, TAUCHEN, MERGULHO) — tighter tracking on the small circles */
+  .touch #btnBoost{letter-spacing:.06em;font-size:10px} .touch #btnRocket{letter-spacing:.06em} .touch #btnDive{letter-spacing:.1em}
 
 
   /* ---------- round 3: targeting markers, hit marker, key legend, engine selector, desktop buttons ---------- */
@@ -270,10 +283,10 @@
   #tipsSel,#musSel{display:inline-flex;align-items:center;gap:10px;margin-left:8px}
   #styleSel{margin-top:8px}
   #styleSel .seg button{min-width:54px}
-  #styleSel .engL b{font-weight:inherit}
+  #styleSel .engL b{font-weight:inherit} #styleSel .sx{display:none}
   .eng .engL{font-size:8.5px;letter-spacing:.26em;color:var(--dim);font-weight:500}
   .eng .engL i{font-style:normal;opacity:.6}
-  @media (max-height:520px){.eng .engL{letter-spacing:.12em}#tipsSel,#musSel{gap:6px;margin-left:4px}#styleSel{margin-top:4px;flex-wrap:nowrap}#styleSel .lx{display:none}}
+  @media (max-height:520px){.eng .engL{letter-spacing:.12em}#tipsSel,#musSel{gap:6px;margin-left:4px}#styleSel{margin-top:4px;flex-wrap:nowrap}#styleSel .lx{display:none}#styleSel .sx{display:inline}}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;pointer-events:auto}
   .seg button{font:inherit;font-size:9.5px;letter-spacing:.12em;color:var(--dim);background:rgba(20,10,8,.3);border:0;border-right:1px solid var(--line);padding:5px 10px 4px;cursor:pointer;text-align:left;line-height:1.25}
   .seg button:last-child{border-right:0}
@@ -306,7 +319,7 @@
   h1{font-weight:200;font-size:clamp(56px,10.5vw,148px);letter-spacing:.2em;line-height:.95;margin:22px 0 0;color:#f6efe6}
   h1 span{display:block;font-size:12px;letter-spacing:1.4em;margin-top:16px;color:var(--dim);font-weight:400}
   .edition{position:absolute;left:calc(6% + var(--sl));bottom:calc(26px + var(--sb));font-size:10px;letter-spacing:.3em;font-weight:500}
-  .edition span{display:block;font-size:8px;color:var(--dim);margin-top:6px;letter-spacing:.32em;font-weight:400}
+  .edition b{font-weight:inherit} .edition span{display:block;font-size:8px;color:var(--dim);margin-top:6px;letter-spacing:.32em;font-weight:400}
   .intro .flight{font-size:10px;letter-spacing:.4em;color:var(--amber);font-weight:500}
   .intro h2{font-size:clamp(28px,3.6vw,46px);font-weight:300;margin:8px 0 6px;letter-spacing:.01em}
   .intro p{font-size:13px;line-height:1.65;color:rgba(242,235,226,.78);font-weight:300}
@@ -372,11 +385,17 @@
   }
   /* round 23: menu buttons (fullscreen, how-to-play) + compact start menu for short landscape screens (browser chrome) */
   .grp{display:contents}
-  button.mini{font:inherit;font-size:9px;letter-spacing:.2em;color:var(--ink);background:rgba(20,10,8,.45);border:1px solid var(--line);border-radius:3px;padding:5px 10px 4px;cursor:pointer;pointer-events:auto;line-height:1.2}
-  button.mini small{font-size:7.5px;opacity:.6;letter-spacing:.1em}
-  button.mini:hover{border-color:var(--amber)}
+  .mini{font:inherit;font-size:9px;letter-spacing:.2em;color:var(--ink);background:rgba(20,10,8,.45);border:1px solid var(--line);border-radius:3px;padding:5px 10px 4px;cursor:pointer;pointer-events:auto;line-height:1.2}
+  .mini small{font-size:7.5px;opacity:.6;letter-spacing:.1em}
+  .mini:hover{border-color:var(--amber)}
   #helpBtn{display:none;margin-top:12px}
-  #fsBtn{position:absolute;top:calc(10px + var(--st));right:calc(12px + var(--sr));z-index:2}
+  #topR{position:absolute;top:calc(10px + var(--st));right:calc(12px + var(--sr));z-index:2;display:flex;gap:6px;align-items:center}
+  /* round 25: language picker (native names) */
+  #langBox{display:inline-flex;align-items:center;gap:5px;position:relative}
+  #langBox svg{width:12px;height:12px;flex:none;opacity:.75}
+  #langPick{font:inherit;font-size:inherit;letter-spacing:.04em;color:var(--ink);background:transparent;border:0;outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;padding:0 2px;max-width:150px}
+  #langPick option{color:#1d1410;background:#ece6d8}
+  #langBox:focus-within{border-color:var(--amber)}
   #fsBtn.hide,.fs-on #fsBtn{display:none}
   @media (max-height:430px) and (orientation:landscape){
     .ed{grid-template-columns:.74fr 1.26fr;gap:3%;align-items:center;overflow-y:auto;overscroll-behavior:contain;
@@ -401,9 +420,20 @@
     .eng .engL{font-size:7.5px;letter-spacing:.14em}
     .seg button{font-size:9px;padding:5px 8px 4px} .seg button small{font-size:7px}
     #styleSel .seg button{min-width:46px}
-    #styleSel .lx{display:none}
-    #fsBtn{top:calc(6px + var(--st));right:calc(8px + var(--sr));padding:4px 8px 3px}
+    #styleSel .lx{display:none} #styleSel .sx{display:inline}
+    #topR{top:calc(6px + var(--st));right:calc(8px + var(--sr))} #fsBtn,#langBox{padding:4px 8px 3px}
   }
+  /* round 25: per-script typography — tracking off for CJK / Hangul / Devanagari (LETHE wordmark keeps its own), taller lines for Hindi */
+  html:is([lang=zh-Hans],[lang=ja],[lang=ko],[lang=hi]) body :not(h1):not(h1 *){letter-spacing:.02em!important}
+  html:is([lang=zh-Hans],[lang=ja],[lang=ko]) h1 span{letter-spacing:.5em}
+  html[lang=hi] h1 span{letter-spacing:.12em}
+  html[lang=ko] body{word-break:keep-all;overflow-wrap:anywhere}   /* Korean wraps between words, not inside them */
+  /* CJK / Devanagari glyphs need a little more size than tracked-out Latin caps to stay legible at HUD scale */
+  html:is([lang=zh-Hans],[lang=ja],[lang=ko],[lang=hi]) :is(.eng .engL,.facts,#stats2 div,.brk span){font-size:9px} html:is([lang=zh-Hans],[lang=ja],[lang=ko],[lang=hi]) #stats div{font-size:10px}
+  html[lang=hi] :is(.lbl,.stat .k,#stats div,#stats2 div,.seg button,button.mini,.primary,button.ghost,.tbtn,.engL,#dampCue,#sDown,.tgt span,.mtag span,.brk span,#pop,#act,#cpCue,#rSub,.eyebrow,.flight,.facts,.edition){line-height:1.5}
+  html[lang=hi] :is(#msg,#toast,.instr,.hint,.legend,#intro .tl,#tut .tl,.intro p){line-height:1.55}
+  html[lang=hi] #burnTag{line-height:1.25;height:22px}
+  html:is([lang=zh-Hans],[lang=ja],[lang=ko]) :is(#msg,.primary,#act b,#act span,#cpCue b){font-weight:500}
   @media (max-height:330px) and (orientation:landscape){ .intro p{display:none} .intro h2{font-size:18px} h1{margin-top:6px} }
 </style>
 <script type="importmap">{"imports":{"three":"./lib/three.module.min.js","three/addons/":"./lib/addons/"}}</script>
@@ -422,22 +452,22 @@
   <div id="reticle"></div>
   <div id="hitx"></div>
   <div id="pL">
-    <div class="row" id="rCargoRow"><div class="lbl"><span>CARGO <i>/ ГРУЗ</i></span><b id="tCargo">100%</b></div><div class="bar" id="bCargo"><div class="ghost"></div><div class="v"></div></div><div id="burnTag">WATER BURN<i>РАСХОД ВОДЫ</i></div></div>
-    <div class="row" id="rShieldRow"><div class="lbl"><span>SHIELD <i>/ ЩИТ</i></span><b id="tShield">100%</b></div><div class="bar" id="bShield"><div class="ghost"></div><div class="v"></div></div></div>
-    <div class="row" id="rHealthRow"><div class="lbl"><span>HEALTH <i>/ ЗДОРОВЬЕ</i></span><b id="tHealth">100%</b></div><div class="bar" id="bHealth"><div class="ghost"></div><div class="v"></div></div></div>
-    <div class="row" id="rRadRow"><div class="lbl"><span>RAD <i>/ РАДИАЦИЯ</i></span><b id="tRad">SHIELDED</b></div><div class="bar" id="bRad"><div class="v"></div></div></div>
-    <div class="row" id="rRocketRow"><div class="lbl"><span>ROCKETS <i>/ РАКЕТЫ</i></span><b id="tRockets">6</b></div><div id="pips"></div></div>
+    <div class="row" id="rCargoRow"><div class="lbl"><span data-i18n="hud.cargo">CARGO</span><b id="tCargo">100%</b></div><div class="bar" id="bCargo"><div class="ghost"></div><div class="v"></div></div><div id="burnTag" data-i18n="hud.burn">WATER BURN</div></div>
+    <div class="row" id="rShieldRow"><div class="lbl"><span data-i18n="hud.shield">SHIELD</span><b id="tShield">100%</b></div><div class="bar" id="bShield"><div class="ghost"></div><div class="v"></div></div></div>
+    <div class="row" id="rHealthRow"><div class="lbl"><span data-i18n="hud.health">HEALTH</span><b id="tHealth">100%</b></div><div class="bar" id="bHealth"><div class="ghost"></div><div class="v"></div></div></div>
+    <div class="row" id="rRadRow"><div class="lbl"><span data-i18n="hud.rad">RAD</span><b id="tRad" data-i18n="hud.shielded">SHIELDED</b></div><div class="bar" id="bRad"><div class="v"></div></div></div>
+    <div class="row" id="rRocketRow"><div class="lbl"><span data-i18n="hud.rockets">ROCKETS</span><b id="tRockets">6</b></div><div id="pips"></div></div>
   </div>
-  <div id="sDown">SHIELD DOWN · ЩИТ СНЯТ</div>
+  <div id="sDown" data-i18n="hud.sDown">SHIELD DOWN</div>
   <div id="pR">
-    <div class="stat"><div class="k">SCORE <i>/ ОЧКИ</i></div><div class="v" id="tScore">0</div></div>
-    <div class="stat"><div class="k">SPEED <i>/ СКОРОСТЬ</i></div><div><span class="v" id="tSpeed">0</span><span class="u">KM/H</span></div></div>
-    <div class="stat"><div class="k">TO B <i>/ ДО Б</i></div><div><span class="v" id="tDist">0</span><span class="u">KM</span></div></div>
+    <div class="stat"><div class="k" data-i18n="hud.score">SCORE</div><div class="v" id="tScore">0</div></div>
+    <div class="stat"><div class="k" data-i18n="hud.speed">SPEED</div><div><span class="v" id="tSpeed">0</span><span class="u" data-i18n="unit.kmh">KM/H</span></div></div>
+    <div class="stat"><div class="k" data-i18n="hud.toB">TO B</div><div><span class="v" id="tDist">0</span><span class="u" data-i18n="unit.km">KM</span></div></div>
   </div>
-  <div id="dampCue">BOAT SCAN — DIVE<i>КАТЕР СКАНИРУЕТ — НЫРЯЙ</i></div>
+  <div id="dampCue" data-i18n="hud.dampScan">BOAT SCAN — DIVE</div>
   <div id="route"><span class="ab" style="left:0">A</span><span class="ab" style="right:0">B</span><div id="routeBar"><div id="routeShip"></div></div></div>
-  <div id="markBox"><div class="lbl"><span>MARK <i>/ МЕТКА</i></span><b id="tMark">0%</b></div><div class="bar" id="bMark"><div class="v"></div></div></div>
-  <div id="airBox"><div class="lbl"><span>AIR <i>/ ВОЗДУХ</i></span><b id="tAir">60s</b></div><div class="bar" id="bAir"><div class="v"></div></div></div>
+  <div id="markBox"><div class="lbl"><span data-i18n="hud.mark">MARK</span><b id="tMark">0%</b></div><div class="bar" id="bMark"><div class="v"></div></div></div>
+  <div id="airBox"><div class="lbl"><span data-i18n="hud.air">AIR</span><b id="tAir">60s</b></div><div class="bar" id="bAir"><div class="v"></div></div></div>
   <div id="msg"></div>
   <div id="pop"></div>
   <div id="act"></div>
@@ -445,8 +475,7 @@
 <div id="toast"></div>
   <div id="intro"></div>
   <div id="tut">
-    <div class="tl">Нырни и пускай торпеду <kbd class="dk">R</kbd></div>
-    <div class="te">DIVE, THEN FIRE A TORPEDO <span class="dk">[R]</span></div>
+    <div class="tl" data-i18n="tut.title">Dive, then fire a torpedo <kbd class="dk">R</kbd></div>
     <div class="tr">
       <svg viewBox="0 0 132 44" aria-hidden="true">
         <path class="w" d="M2 13H130"/>
@@ -457,97 +486,97 @@
         <circle class="wk" cx="104" cy="20.5" r="2.6"/>
       </svg>
       <div class="tx">
-        <div class="tk"><span class="dk"><kbd>E</kbd> dive, then <kbd>R</kbd> torpedo <i>· жми E, затем R</i></span><span class="tt">Tap <b>DIVE</b>, then <b>ROCKET</b> <i>· НЫРОК, затем РАКЕТА</i></span></div>
-        <div class="tc">scan beam damps engines — dive ↓, torpedo → boat<i>луч глушит двигатели — нырни ↓, торпеда → катер</i></div>
+        <div class="tk"><span class="dk" data-i18n="tut.keyD"></span><span class="tt" data-i18n="tut.keyT"></span></div>
+        <div class="tc" data-i18n="tut.sub"></div>
       </div>
     </div>
   </div>
   <div id="qual"></div>
-  <div id="keys"><kbd>WASD</kbd>steer · <kbd>Space</kbd>/<kbd>LMB</kbd> fire · <kbd>R</kbd>/<kbd>RMB</kbd> rocket<br><kbd>Shift</kbd>boost · <kbd>E</kbd><kbd>C</kbd><kbd>Q</kbd>dive · <kbd>M</kbd>mute · <kbd>V</kbd>engine · <kbd>H</kbd>hide</div>
-  <div id="engBtn" title="Engine sound (V) / Звук двигателя"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></svg></div>
-  <div id="snd" title="Sound (M) / Звук"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" stroke="none"/><path class="w1" d="M16 9.5a3.5 3.5 0 0 1 0 5"/><path class="w2" d="M18.5 7a7 7 0 0 1 0 10"/><path class="x" d="M16 9l5 6M21 9l-5 6" style="display:none"/></svg></div>
+  <div id="keys" data-i18n="hud.keys"></div>
+  <div id="engBtn" title="Engine sound (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></svg></div>
+  <div id="snd" data-i18n-title="hud.soundTitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" stroke="none"/><path class="w1" d="M16 9.5a3.5 3.5 0 0 1 0 5"/><path class="w2" d="M18.5 7a7 7 0 0 1 0 10"/><path class="x" d="M16 9l5 6M21 9l-5 6" style="display:none"/></svg></div>
 </div>
 
 <div id="touch">
   <div id="stickZone"></div>
   <div id="stickBase"><div id="stickKnob"></div></div>
-  <div class="tbtn" id="btnFire" title="Fire / Огонь">FIRE<small>ОГОНЬ</small><em>[Space]</em></div>
-  <div class="tbtn" id="btnDive" title="Dive / Нырок">DIVE<small>НЫРОК</small><em>[E]</em></div>
-  <div class="tbtn" id="btnBoost" title="Boost / Форсаж">BOOST<small>ФОРСАЖ</small><em>[Shift]</em></div>
-  <div class="tbtn" id="btnRocket" title="Rocket / Ракета">ROCKET<small>РАКЕТА</small><em>[R]</em></div>
-  <div class="tbtn" id="btnTilt">TILT <small>НАКЛОН</small></div>
+  <div class="tbtn" id="btnFire" data-i18n-title="btn.fire"><span data-i18n="btn.fire">FIRE</span><em>[Space]</em></div>
+  <div class="tbtn" id="btnDive" data-i18n-title="btn.dive"><span data-i18n="btn.dive">DIVE</span><em>[E]</em></div>
+  <div class="tbtn" id="btnBoost" data-i18n-title="btn.boost"><span data-i18n="btn.boost">BOOST</span><em>[Shift]</em></div>
+  <div class="tbtn" id="btnRocket" data-i18n-title="btn.rocket"><span data-i18n="btn.rocket">ROCKET</span><em>[R]</em></div>
+  <div class="tbtn" id="btnTilt"><span data-i18n="btn.tilt">TILT</span></div>
 </div>
 
 <div class="screen" id="start">
   <div class="ed">
     <div>
-      <div class="eyebrow">A WATER CHARTER STORY · ВОДНАЯ ХАРТИЯ</div>
-      <h1>LETHE<span>ЛЕТА</span></h1>
-      <button type="button" class="mini" id="helpBtn">HOW TO PLAY <small>КАК ИГРАТЬ</small></button>
+      <div class="eyebrow" data-i18n="menu.eyebrow">A WATER CHARTER STORY</div>
+      <h1>LETHE<span data-i18n="menu.sub">ΛΗΘΗ</span></h1>
+      <button type="button" class="mini" id="helpBtn" data-i18n="menu.help">HOW TO PLAY</button>
     </div>
     <div class="intro">
-      <div class="flight">FLIGHT 01 · РЕЙС 01</div>
-      <h2>Delivery.</h2>
-      <p>Two suns. One river. A settlement running dry.<br>Bring the water home. <span style="opacity:.6">/ Доставьте воду в посёлок Б.</span></p>
-      <div class="facts"><span>8.0 KM <i>MELAS CANYON</i></span><span>6 000 L <i>FRESH WATER</i></span><span>≈ 2:36 <i>FLIGHT</i></span></div>
-      <button class="primary" id="startBtn"><span>BEGIN DELIVERY<small>НАЧАТЬ РЕЙС</small></span><span>↗</span></button>
+      <div class="flight" data-i18n="menu.flight">FLIGHT 01</div>
+      <h2 data-i18n="menu.h2">Delivery.</h2>
+      <p data-i18n="menu.p">Two suns. One river. A settlement running dry.<br>Bring the water home.</p>
+      <div class="facts"><span data-i18n="menu.factDist"></span><span data-i18n="menu.factWater"></span><span data-i18n="menu.factTime"></span></div>
+      <button class="primary" id="startBtn"><span data-i18n="menu.start">BEGIN DELIVERY</span><span>↗</span></button>
       <div class="helpbox" id="helpBox">
       <div class="legend">
-        <span><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> steer · climb</span><span><kbd>Shift</kbd> boost</span>
-        <span><kbd>Space</kbd> / <kbd>LMB</kbd> fire cannons</span><span><kbd>E</kbd> <kbd>C</kbd> <kbd>Q</kbd> dive / surface</span>
-        <span><kbd>R</kbd> / <kbd>RMB</kbd> rocket</span><span><kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>V</kbd> engine · <kbd>H</kbd> keys</span>
+        <span data-i18n="legend.steer"></span><span data-i18n="legend.boost"></span>
+        <span data-i18n="legend.fire"></span><span data-i18n="legend.dive"></span>
+        <span data-i18n="legend.rocket"></span><span data-i18n="legend.misc"></span>
       </div>
       <div class="instr">
-        <span class="tonly"><b>Left thumb</b> stick · <b>FIRE</b> / <b>BOOST</b> hold · <b>ROCKET</b> / <b>DIVE</b> tap · <b>TILT</b> gyro · ⚙ engine<br></span>
-        <span class="tg">Amber brackets</span> = targets. Drones mark you, <b>relays</b> pass it to rim turrets — down a relay, the sector goes blind. <span class="cy">Spare the cyan field masts</span>: no field, radiation. Water hides you — mines and hunters wait below.
+        <span class="tonly" data-i18n="instr.touch"></span>
+        <span data-i18n="instr.main"></span>
       </div>
-      <div class="hint">Drones = LETHE's eyes. Shoot them before they mark you — or dive. A boat's scan beam damps your engines — dive, then knock it out from below.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй. Луч катера глушит двигатели — нырни и бей снизу.</i></div>
+      <div class="hint" data-i18n="hint.main"></div>
       </div>
       <div class="sets">
-      <div class="eng" id="engSel"><span class="grp" id="engGrp"><span class="engL">ENGINE <i>/ ДВИГАТЕЛЬ</i></span><div class="seg"></div></span>
-        <span id="tipsSel"><span class="engL">TIPS <i>/ ПОДСКАЗКИ</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span>
-        <span id="musSel"><span class="engL">MUSIC <i>/ МУЗЫКА</i></span><span class="seg"><button type="button" data-v="1">ON<small>ВКЛ</small></button><button type="button" data-v="0">OFF<small>ВЫКЛ</small></button></span></span></div>
-      <div class="eng" id="styleSel"><span class="grp" id="styleGrp"><span class="engL"><b class="lx">MUSIC </b>STYLE <i>/ СТИЛЬ<b class="lx"> МУЗЫКИ</b></i></span><div class="seg"></div></span></div>
+      <div class="eng" id="engSel"><span class="grp" id="engGrp"><span class="engL" data-i18n="set.engine">ENGINE</span><div class="seg"></div></span>
+        <span id="tipsSel"><span class="engL" data-i18n="set.tips">TIPS</span><span class="seg"><button type="button" data-v="1" data-i18n="set.on">ON</button><button type="button" data-v="0" data-i18n="set.off">OFF</button></span></span>
+        <span id="musSel"><span class="engL" data-i18n="set.music">MUSIC</span><span class="seg"><button type="button" data-v="1" data-i18n="set.on">ON</button><button type="button" data-v="0" data-i18n="set.off">OFF</button></span></span></div>
+      <div class="eng" id="styleSel"><span class="grp" id="styleGrp"><span class="engL"><b class="lx" data-i18n="set.styleLong">MUSIC STYLE</b><b class="sx" data-i18n="set.style">STYLE</b></span><div class="seg"></div></span></div>
       </div>
     </div>
   </div>
-  <button type="button" class="mini" id="fsBtn">⛶ FULLSCREEN <small>ПОЛНЫЙ ЭКРАН</small></button>
-  <div class="edition">CORMORANT / БАКЛАН<span>AMPHIBIOUS WATER COURIER</span></div>
+  <div id="topR"><label class="mini" id="langBox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9s1.2-6.4 3.8-9z"/></svg><select id="langPick" data-i18n-aria="set.lang" data-i18n-title="set.lang"></select></label><button type="button" class="mini" id="fsBtn" data-i18n="menu.fs">⛶ FULLSCREEN</button></div>
+  <div class="edition"><b data-i18n="menu.edition">CORMORANT</b><span data-i18n="menu.editionSub">AMPHIBIOUS WATER COURIER</span></div>
 </div>
 
 <div class="screen hide" id="result">
-  <div class="eyebrow">FLIGHT RECORDER · БОРТОВОЙ ЖУРНАЛ</div>
-  <h2 id="rTitle">Water delivered.</h2>
-  <div id="rSub">ДОСТАВЛЕНО</div>
+  <div class="eyebrow" data-i18n="res.eyebrow">FLIGHT RECORDER</div>
+  <h2 id="rTitle" data-i18n="res.ok">MISSION COMPLETE</h2>
+  <div id="rSub"></div>
   <div id="stats">
-    <div>TIME / ВРЕМЯ<b id="rTime"></b></div>
-    <div>DESTROYED / УНИЧТОЖЕНО<b id="rKills"></b></div>
-    <div>BOATS SUNK / КАТЕРА<b id="rBoatsSunk"></b></div>
-    <div>ACCURACY / ТОЧНОСТЬ<b id="rAcc"></b></div>
-    <div>CRASHES / АВАРИИ<b id="rDeaths"></b></div>
-    <div>CARGO / ГРУЗ<b id="rCargo"></b></div>
-    <div class="big">SCORE / ОЧКИ<b id="rScore"></b></div>
+    <div><span data-i18n="st.time">TIME</span><b id="rTime"></b></div>
+    <div><span data-i18n="st.destroyed">DESTROYED</span><b id="rKills"></b></div>
+    <div><span data-i18n="st.boatsSunk">BOATS SUNK</span><b id="rBoatsSunk"></b></div>
+    <div><span data-i18n="st.acc">ACCURACY</span><b id="rAcc"></b></div>
+    <div><span data-i18n="st.crashes">CRASHES</span><b id="rDeaths"></b></div>
+    <div><span data-i18n="st.cargo">CARGO</span><b id="rCargo"></b></div>
+    <div class="big"><span data-i18n="st.score">SCORE</span><b id="rScore"></b></div>
   </div>
   <div id="stats2">
-    <div>GATE / ВРАТА<b id="rGate"></b></div>
-    <div>WATER DELIVERED / ВОДА<b id="rWater"></b></div>
-    <div>BURNED / СОЖЖЕНО<b id="rBurned"></b></div>
-    <div>HEALTH / ЗДОРОВЬЕ<b id="rHealth"></b></div>
-    <div>AIR TARGETS / ЦЕЛИ<b id="rTargets"></b></div>
-    <div>RELAYS / РЕТРАНСЛЯТОРЫ<b id="rRelays"></b></div>
-    <div>MINES / МИНЫ<b id="rMines"></b></div>
-    <div>HUNTERS / ОХОТНИКИ<b id="rHunters"></b></div>
-    <div>BOATS / КАТЕРА<b id="rBoats"></b></div>
-    <div>MASTS / МАЧТЫ<b id="rMasts"></b></div>
-    <div>LETHE HITS / ПОПАДАНИЯ<b id="rHits"></b></div>
+    <div><span data-i18n="st.gate">GATE</span><b id="rGate"></b></div>
+    <div><span data-i18n="st.water">WATER DELIVERED</span><b id="rWater"></b></div>
+    <div><span data-i18n="st.burned">BURNED</span><b id="rBurned"></b></div>
+    <div><span data-i18n="st.health">HEALTH</span><b id="rHealth"></b></div>
+    <div><span data-i18n="st.targets">AIR TARGETS</span><b id="rTargets"></b></div>
+    <div><span data-i18n="st.relays">RELAYS</span><b id="rRelays"></b></div>
+    <div><span data-i18n="st.mines">MINES</span><b id="rMines"></b></div>
+    <div><span data-i18n="st.hunters">HUNTERS</span><b id="rHunters"></b></div>
+    <div><span data-i18n="st.boats">BOATS</span><b id="rBoats"></b></div>
+    <div><span data-i18n="st.masts">MASTS</span><b id="rMasts"></b></div>
+    <div><span data-i18n="st.hits">LETHE HITS</span><b id="rHits"></b></div>
   </div>
   <div class="rbtns">
-    <button class="primary" id="retry"><span>FLY AGAIN<small>ЗАНОВО</small></span><span>↗</span></button>
-    <button class="ghost" id="menuBtn"><span>MENU<small>МЕНЮ</small></span></button>
+    <button class="primary" id="retry"><span data-i18n="res.retry">FLY AGAIN</span><span>↗</span></button>
+    <button class="ghost" id="menuBtn"><span data-i18n="res.menu">MENU</span></button>
   </div>
 </div>
 
-<div class="screen" id="rotate"><div class="phone"></div><div>ROTATE TO LANDSCAPE<br><span style="opacity:.6">ПОВЕРНИТЕ ТЕЛЕФОН</span></div></div>
+<div class="screen" id="rotate"><div class="phone"></div><div data-i18n="menu.rotate">ROTATE TO LANDSCAPE</div></div>
 <div id="fade" class="ov"></div>
 
 <script type="module" src="./src/main.js"></script>

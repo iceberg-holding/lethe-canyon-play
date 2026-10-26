@@ -1191,3 +1191,25 @@ The hull mesh (still procedural, still the same bow/stern split and the same col
 The two later boats sit over a short mine slalom on the approach (mines moved out of the dense field, so the river still has **36**). The centerline under the hull stays open for the belly shot. The first two boats stay clear so the tutorial dive is still the simple one: see the beam, dive, torpedo.
 
 Sounds are procedural only (`AUDIO_CREDITS.md`). Headless check: `_test/r15.mjs`.
+
+## Round 25 — 12 languages (i18n)
+
+The UI now shows **one language at a time** — the old "EN / RU" pairs are gone. Languages: `en`, `ru`, `de`, `es`, `pl`, `fr`, `pt-BR`, `zh-Hans`, `ja`, `ko`, `hi`, `id` (180 keys each).
+
+**Architecture**
+
+- `src/i18n.js` holds the language list (code and native name), detection, `t(key, params)`, `setLang`, `applyDom` and `onLang`. There is no library and no fetch: every dictionary is a static ES module import, so it works offline.
+- `src/lang/<code>.js` holds one dictionary per language (`export default { 'key': 'text' }`). `en.js` is the reference, and every key the game uses must be there. The RU strings were copied word for word from the old bilingual UI.
+- Lookup order: current language, then English. A missing key logs `console.warn('[i18n] missing', lang, key)` once and shows the English text. `{name}` placeholders are filled from `params`.
+- Language selection, in priority order: `?lang=xx` (tests, not saved) → `localStorage['lethe.lang']` → `navigator.languages` (`zh*` → zh-Hans, `pt*` → pt-BR, `in` → id, regional variants fall back to the base language) → `en`.
+- Static DOM: elements carry `data-i18n="key"` (sets innerHTML, because the dictionaries are our own and contain `<b>/<kbd>/<br>`), `data-i18n-title` and `data-i18n-aria`. `applyDom()` also sets `<html lang>` and `document.title`.
+- Dynamic text (showMsg, toasts, score pop-ups, target tags, HUD values, acts, checkpoints, tutorial and intro prompts, engine and music-style names, the result screen) goes through `t()` when it is shown. `onLang` handlers re-render text built once in JS: route-tick titles, bracket, DO-NOT-HIT and ARMORED tags, the engine button title, the mark, burn and damp labels, and the result screen if it is open.
+- Picker: a native `<select>` (globe icon, native names) in the top-right of the start menu, next to FULLSCREEN. It fits the r23 compact menu at 640×360. Switching re-renders the page live and saves the choice.
+- Fonts are system fonts only. A CJK, Hangul and Devanagari fallback stack sits after the Latin stack, and `html[lang=…]` picks the right CJK glyph variant (SC/JP/KR) first. For zh, ja, ko and hi, letter-spacing is reduced to .02em (the LETHE wordmark keeps its tracking). Hindi gets line-height 1.5–1.55 so matras don't clip. Centre messages (`#msg`) wrap to 94vw instead of running off narrow screens, and the burn tag can wrap to 2 lines.
+- Names: RU keeps ЛЕТА / Баклан. Every other language uses LETHE / CORMORANT in Latin caps. The small subtitle under the LETHE wordmark is localised (ΛΗΘΗ, 忘川, レーテー, 레테, लेथे). LETHE's quips are adapted per language instead of translated word for word (e.g. PL "…i przepadł jak kamień w wodę.", FR "…et il m'a filé entre les doigts.").
+
+**Adding a key:** add it to `src/lang/en.js`, then to every other `src/lang/*.js`, and use `t('my.key')` (or `data-i18n="my.key"` in index.html). `window.__lethe.i18n.missingAll()` must return empty lists.
+
+**Adding a language:** create `src/lang/<code>.js` (copy `en.js`), import it in `src/i18n.js` and add it to `DICT` and `LANGS` with its native name. If its script needs a font, extend the `--cjk` stack or add an `html[lang=…]` rule in index.html.
+
+**Test hooks:** `window.__lethe.i18n` = `{ lang, setLang(code), missing(), missingAll(), t(), langs, keys() }`. `window.__lethe.debug.showResult(ok = true)` opens the result screen. Headless check: `/workspace/pwtools/r25i18n.mjs` covers every language at 915×412 and 640×360. It checks console and page errors, missing keys, leftover Cyrillic outside RU, EN/RU pairs, kill/dead words and overflow (menu, help box, HUD, crash message, stats), and writes screenshots to `shots/r25_<lang>_{menu,help,hud,stats}.png`.

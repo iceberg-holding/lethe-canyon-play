@@ -21,6 +21,8 @@ import { Ship, makeEnvMap } from './ship.js';
 import { Audio, ENGINES, MUSIC_STYLES } from './audio.js';
 import { input, setupInput, pollInput } from './input.js';
 import { Post, QualityGovernor, TIERS } from './post.js';
+import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js';   // tx: `t` is a common local name here (phase timers, torpedoes)
+applyDom();   // round 25: localise the static DOM before the first frame
 
 THREE.ColorManagement.enabled = false;
 const params = new URLSearchParams(location.search);
@@ -161,7 +163,7 @@ function applyQuality(name) {
   motes.obj.visible = T.name !== 'low';
   waterMat.uniforms.uGlint.value = T.glintK;
   scene.traverse((o) => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.needsUpdate = true; }); });
-  const q = document.getElementById('qual'); if (q) q.textContent = 'QUALITY · ' + name.toUpperCase();
+  const q = document.getElementById('qual'); if (q) q.textContent = tx('hud.quality', { q: name.toUpperCase() });
 }
 const governor = new QualityGovernor(quality, !!qParam, (name) => applyQuality(name));
 governor.max = isTouch ? 1 : 2;   // phones never auto-raise to the heavy tier
@@ -381,11 +383,11 @@ const routeTick = (s, cls, title) => {
   hud.routeBar.appendChild(el);
   return el;
 };
-routeTick(GATE_S, 'gt', 'LETHE GATE / ВРАТА ЛЕТЫ');
+const gateTick = routeTick(GATE_S, 'gt', tx('lbl.gate'));
 const brackets = [0, 1, 2].map(() => {
   const el = document.createElement('div');
   el.className = 'brk';
-  el.innerHTML = $('brackets').children.length ? '' : '<span>LETHE · СПОТТЕР</span>';
+  el.innerHTML = $('brackets').children.length ? '' : `<span>${tx('lbl.spotterTag')}</span>`;
   $('brackets').appendChild(el);
   return el;
 });
@@ -421,8 +423,8 @@ const shipPos = new THREE.Vector3(), shipFwd = new THREE.Vector3(), shipVel = ne
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), camOff = new THREE.Vector3();
 let camInit = false, camUnder = false, camLatAdj = 0;
 
-function showMsg(en, ru, dur = 2, color = '#f6efe6') {
-  hud.msg.innerHTML = `${en}<small>${ru}</small>`;
+function showMsg(text, dur = 2, color = '#f6efe6') {
+  hud.msg.textContent = text;
   hud.msg.style.color = color;
   hud.msg.style.opacity = 1;
   G.msgT = dur;
@@ -557,8 +559,8 @@ function damage(amount, p, kind) {
     G.hitFlash = 1;
     pulseRow(hud.rowCargo);
     audio.hit();
-    if (G.cargo <= 0) fail('CARGO TANK BREACHED', 'ЦИСТЕРНА ПРОБИТА');
-    else if (G.cargo < 30) showMsg('CARGO CRITICAL', 'ГРУЗ НА ИСХОДЕ', 1.4, '#ff8a5a');
+    if (G.cargo <= 0) fail('fail.cargo');
+    else if (G.cargo < 30) showMsg(tx('msg.cargoCritical'), 1.4, '#ff8a5a');
   }
   return rest;
 }
@@ -570,14 +572,14 @@ function hitCargo(dmg, p) {
   sparkBurst(p || shipPos, 30);
   damage(dmg, p || shipPos, 'collision');
 }
-function fail(en, ru) {
+function fail(key) {
   if (G.phase === 'failed' || G.phase === 'result') return;
-  G.phase = 'failed'; G.phaseT = 0; G.outcome = 'failed'; G.reason = en + ' / ' + ru;
+  G.phase = 'failed'; G.phaseT = 0; G.outcome = 'failed'; G.reasonKey = key; G.reason = tx(key);
   G.dive = false;
   G.deaths++;
   G.respawn = CP_ON;   // round 18: respawn at the last checkpoint instead of ending the mission
-  if (G.respawn) showMsg(`SHIP CRASHED — ${en}`, `КОРАБЛЬ РАЗБИТ — ${ru}`, 2.2, '#ff7a5a');
-  else showMsg('MISSION FAILED', 'МИССИЯ ПРОВАЛЕНА', 3, '#ff7a5a');
+  if (G.respawn) showMsg(tx('msg.crashed', { reason: G.reason }), 2.2, '#ff7a5a');
+  else showMsg(tx('res.fail'), 3, '#ff7a5a');
   explode(shipPos, 0.8);
   audio.explosion(1.2, 1);
 }
@@ -588,7 +590,7 @@ const SHIP_R = 3.2;
 const UW_FWD = 20, UW_DRAG = 2.6, UW_LAT = 11, UW_LAT_K = 3;
 function toggleDive() {
   if (G.phase !== 'flight') return;
-  if (!G.dive && G.air < 3) { showMsg('NO AIR', 'НЕТ ВОЗДУХА', 1.2, '#7ff'); return; }
+  if (!G.dive && G.air < 3) { showMsg(tx('msg.noAir'), 1.2, '#7ff'); return; }
   G.dive = !G.dive;
   audio.dive();
 }
@@ -668,7 +670,7 @@ function updateFlight(dt) {
     const t = G.phaseT;
     G.y = PAD_TOP + 1.7 + smoothstep(0.3, 2.6, t) * 9;
     G.speed = smoothstep(0.9, 2.8, t) * 45;
-    if (t > 2.8) { G.phase = 'flight'; showMsg('FLY TO SETTLEMENT B', 'ЛЕТИТЕ В ПОСЕЛЕНИЕ Б', 2); }
+    if (t > 2.8) { G.phase = 'flight'; showMsg(tx('msg.flyToB'), 2); }
   } else if (G.phase === 'landing') {
     const rem = PAD_B - G.s;
     const ts = rem > 0.5 ? clamp(rem * 0.32, 4, 64) : 0;
@@ -679,7 +681,7 @@ function updateFlight(dt) {
     if (rem <= 0.6) { G.s = PAD_B; G.speed = 0; }
     if (rem < 1.2 && Math.abs(G.y - (PAD_TOP + 1.7)) < 0.25 && G.phaseT > 1) {
       G.phase = 'landed'; G.phaseT = 0; G.outcome = 'delivered';
-      showMsg('TOUCHDOWN — CARGO DELIVERED', 'ПОСАДКА — ГРУЗ ДОСТАВЛЕН', 3, '#9ff2d8');
+      showMsg(tx('msg.touchdown'), 3, '#9ff2d8');
     }
   } else if (G.phase === 'landed') {
     G.speed = 0; G.vLat = 0; G.vY = 0; G.y += (PAD_TOP + 1.7 - G.y) * damp(4, dt);
@@ -719,7 +721,7 @@ function updateFlight(dt) {
     // round 6: thin air (mast down) — a gentle sink when not climbing, fading out near the water (no bounce)
     if (G.thinAir && !G.dive && iy <= 0.1 && G.y >= 0.9) vYt -= THIN_SINK * clamp((G.y - 3) / 4, 0, 1);
     G.vY += (vYt - G.vY) * damp(6, dt);
-    if (G.s > PAD_B - 330) { G.phase = 'landing'; G.phaseT = 0; G.dive = false; showMsg('SETTLEMENT B — AUTO-LANDING', 'ПОСЕЛЕНИЕ Б — АВТОПОСАДКА', 2.5, '#9ff2d8'); }
+    if (G.s > PAD_B - 330) { G.phase = 'landing'; G.phaseT = 0; G.dive = false; showMsg(tx('msg.autoLand'), 2.5, '#9ff2d8'); }
   }
 
   // rocket recoil: brief ~13 % dip of forward progress (fast attack, ~0.3 s hold, smooth recovery).
@@ -990,7 +992,7 @@ function findRocketTarget(from, dir) {
 }
 function fireRocket() {
   if (G.rocketCd > 0) return;
-  if (G.rockets <= 0) { audio.empty(); popScore('NO ROCKETS / НЕТ РАКЕТ'); G.rocketCd = 0.4; return; }
+  if (G.rockets <= 0) { audio.empty(); popScore(tx('pop.noRockets')); G.rocketCd = 0.4; return; }
   const r = rockets.find((x) => !x.on);
   if (!r) return;
   G.rockets--; G.rocketsFired++; G.rocketCd = ROCKET_CD;
@@ -1094,7 +1096,7 @@ function killTarget(kind, obj) {
   explode(kind === 'turret' ? obj.wp : obj.wp, kind === 'beacon' ? 0.8 : kind === 'turret' ? 1.3 : 1);
   audio.hitTick(); audio.score();
   hitMarker();
-  const label = { drone: 'SPOTTER / ДРОН', beacon: 'RELAY / РЕТРАНСЛЯТОР', turret: 'TURRET / ТУРЕЛЬ' }[kind];
+  const label = tx({ drone: 'lbl.spotter', beacon: 'lbl.relay', turret: 'lbl.turret' }[kind]);
   popScore(`+${pts} ${label}`);
   if (kind === 'beacon') { beacons.setMatrixAt(BEACONS.indexOf(obj), ZERO_M); beacons.instanceMatrix.needsUpdate = true; relayDown(obj, blinds); }
   if (kind === 'drone' && obj.spotting) {
@@ -1102,7 +1104,7 @@ function killTarget(kind, obj) {
     G.mark = 0;
     if (G.lock.phase === 'laser') G.lock.phase = 'none';
     obj.spotting = false;
-    showMsg('SPOTTER DOWN — MARK CLEARED', 'СПОТТЕР СБИТ — МЕТКА СНЯТА', 1.6, '#9ff2d8');
+    showMsg(tx('msg.spotterDown'), 1.6, '#9ff2d8');
   }
   if (kind === 'turret') { G.turretKills++; if (G.lock.turret === obj) G.lock.phase = 'none'; }
 }
@@ -1113,17 +1115,17 @@ function relayDown(r, blinds) {
   sparkBurst(r.top, 14, [2.2, 0.3, 0.15]);
   if (!blinds) {
     const left = r.zone.relays.filter((x) => x.alive).length;
-    toast(`<b>RELAY DOWN</b> — sector still linked (${left} left)<br><i>РЕТРАНСЛЯТОР СБИТ — сектор ещё на связи (осталось ${left})</i>`, 3.5, true);
+    toast(tx('toast.relayLinked', { n: left }), 3.5, true);
     return;
   }
   // the section goes blind: break a lock held by one of its turrets
   const L = G.lock;
   if (L.turret && L.turret.zone === r.zone && (L.phase === 'laser' || L.phase === 'volley')) { L.phase = 'cool'; L.t = 0.6; }
-  showMsg('RELAY DOWN — TURRETS BLIND', 'РЕТРАНСЛЯТОР СБИТ — ТУРЕЛИ ОСЛЕПЛИ', 2, '#ffb070');
-  toast('<b>RELAY DOWN — turrets blind</b><br><i>РЕТРАНСЛЯТОР СБИТ — турели ослепли</i>', 3.5, true);
+  showMsg(tx('msg.relayBlind'), 2, '#ffb070');
+  toast(tx('toast.relayBlind'), 3.5, true);
   if (!G.blindSaid) {
     G.blindSaid = true;
-    toast('LETHE: <em>“…link lost. Sector blind.”</em> &nbsp;/&nbsp; ЛЕТА: <em>«…связь потеряна. Сектор слеп.»</em>', 4);
+    toast(tx('toast.letheBlind'), 4);
   }
 }
 function breakMast(m) {
@@ -1134,8 +1136,8 @@ function breakMast(m) {
   explode(m.top, 1.1, true);
   audio.collapse();
   setMastMatrix(m, MASTS.indexOf(m));
-  showMsg('MAST HIT — FIELD DOWN', 'МАЧТА СБИТА — ПОЛЕ СНЯТО', 2.6, '#ff8a5a');
-  popScore('−300 MAST / МАЧТА');
+  showMsg(tx('msg.mastHit'), 2.6, '#ff8a5a');
+  popScore(`−300 ${tx('lbl.mast')}`);
   zoneEls[ZONES.indexOf(m.zone)].classList.add('off');
 }
 // world collision of a moving bolt: returns true if it hit terrain/water (and spawns the effect)
@@ -1263,7 +1265,7 @@ function findTorpedoTarget() {
 }
 function fireTorpedo() {
   if (G.rocketCd > 0) return;
-  if (G.rockets <= 0) { audio.empty(); popScore('NO TORPEDOES / НЕТ ТОРПЕД'); G.rocketCd = 0.4; return; }
+  if (G.rockets <= 0) { audio.empty(); popScore(tx('pop.noTorps')); G.rocketCd = 0.4; return; }
   const t = torps.find((x) => !x.on);
   if (!t) return;
   G.rockets--; G.rocketsFired++; G.rocketCd = ROCKET_CD; TORP.fired++;
@@ -1296,7 +1298,7 @@ function torpedoHit(t, bt) {
   const c = bt.type === 'patrol' ? [0.6, 1.8, 2] : [2, 1.1, 0.4];
   for (let i = 0; i < 26; i++) sparks.emit(p.x, p.y, p.z, (Math.random() - 0.5) * 20, Math.random() * 10, (Math.random() - 0.5) * 20, 0.4, 1.2, 0.3, c[0], c[1], c[2], 1, 0, 3);
   if (bt.hp <= 0) { TORP.kills++; killBoat(bt, true); }
-  else { audio.hitTick(); hitMarker(); popScore(`HULL ${Math.round((bt.hp / BOAT_HP) * 100)}% · ONE MORE / ЕЩЁ ОДНА`); }
+  else { audio.hitTick(); hitMarker(); popScore(tx('pop.hull', { p: Math.round((bt.hp / BOAT_HP) * 100) })); }
 }
 function updateTorpedoes(dt) {
   for (let i = 0; i < TORP_N; i++) {
@@ -1452,7 +1454,7 @@ function updateLethe(dt, time) {
     threat(d, d.wp);
     if (!G.droneHinted && !introArmed('drone')) {   // round 17: the intro prompt replaces this toast while armed
       G.droneHinted = true;
-      toast('<b>Drones = LETHE\'s eyes.</b> Shoot them before they mark you — or dive.<br><i>Дроны — глаза ЛЕТЫ: сбей или ныряй.</i>', 5);
+      toast(tx('toast.drones'), 5);
     }
     if (nb < brackets.length) {
       V3.copy(d.wp).project(camera);
@@ -1485,7 +1487,7 @@ function updateLethe(dt, time) {
       L.phase = 'laser'; L.t = 1.35; L.turret = cand; L.shots = 0; G.lostSaid = false; L.relay = true;
       logLock(cand, true);
       audio.lockOn(); audio.laser();
-      showMsg('LETHE LOCK — DIVE OR DODGE', 'ЗАХВАТ ЛЕТЫ — НЫРЯЙ', 1.6, '#ff6a50');
+      showMsg(tx('msg.lock'), 1.6, '#ff6a50');
     } else if (G.noRelay && !G.blockLogged) { G.blockLogged = true; logLock(null, false); }
   }
   if (G.mark < 0.5) G.blockLogged = false;
@@ -1496,7 +1498,7 @@ function updateLethe(dt, time) {
     L.t -= dt;
     if (G.underwater || !active) {
       L.phase = 'none'; G.mark = Math.min(G.mark, 0.5);
-      if (!G.lostSaid && active) { G.lostSaid = true; toast('LETHE: <i>“…and I lost him.”</i> &nbsp;/&nbsp; ЛЕТА: <i>«…и я потеряла его.»</i>', 3.5); audio.lost(); }
+      if (!G.lostSaid && active) { G.lostSaid = true; toast(tx('toast.letheLost'), 3.5); audio.lost(); }
     } else if (L.t <= 0) { L.phase = 'volley'; L.t = 0; L.shots = 0; }
   } else if (L.phase === 'volley') {
     L.t -= dt;
@@ -1794,13 +1796,13 @@ function detonateMine(m) {
   const p = V4.copy(m.wp).clone();
   underwaterBlast(p, 1.15);
   const contact = m.cause === 'contact';
-  if (!contact) { G.mineKills++; navalKill(MINE_PTS, 'MINE / МИНА'); }
+  if (!contact) { G.mineKills++; navalKill(MINE_PTS, tx('lbl.mine')); }
   const d = p.distanceTo(shipPos);
   if (contact) {
     G.mineHits++;
     damage(MINE_DMG, p, 'mine');
     G.hitFlash = 1; G.shake = Math.min(1.6, G.shake + 1.1); G.speed *= 0.7; G.vY += G.y > 0 ? 9 : 4;
-    showMsg('MINE!', 'МИНА!', 1.2, '#ff8a5a');
+    showMsg(tx('msg.mine'), 1.2, '#ff8a5a');
   } else if (d < 11 && (G.phase === 'flight' || G.phase === 'landing')) {
     damage(MINE_DMG * 0.7 * (1 - d / 11), p, 'mine');
     G.shake = Math.min(1.5, G.shake + 0.6);
@@ -1865,7 +1867,7 @@ function killHunter(h) {
   for (let i = 0; i < 4; i++) { V4.set(Math.random() - 0.5, Math.random() * 0.5, Math.random() - 0.5).normalize().multiplyScalar(6 + Math.random() * 6); debris.emit(p, V4, 0.2 + Math.random() * 0.2, 0.2); }
   lightFlash(p, 300, 0.3, 0.4, 0.95, 1);
   audio.explosion(0.5, clamp(1 - camera.position.distanceTo(p) / 120, 0, 1), panOf(p));
-  navalKill(HUNTER_PTS, 'HUNTER / ОХОТНИК');
+  navalKill(HUNTER_PTS, tx('lbl.hunter'));
 }
 // ---- boats
 function hitBoat(bt, p) {
@@ -1914,7 +1916,7 @@ function killBoat(bt, blasted = false) {
   audio.shockWave(panOf(p));
   audio.boatSink(panOf(p));
   bt.scan = 'off';
-  navalKill(BOAT_PTS[bt.type], bt.type === 'patrol' ? 'PATROL BOAT / КАТЕР' : 'SMUGGLER / КОНТРАБАНДИСТ');
+  navalKill(BOAT_PTS[bt.type], tx(bt.type === 'patrol' ? 'lbl.patrol' : 'lbl.smuggler'));
 }
 const armorEls = [];
 let armorI = 0;
@@ -1933,7 +1935,7 @@ function armoredTag(p) {
   G.armorT = 0.45;
   G.ricochets++;
   if (!armorEls.length) for (let i = 0; i < 3; i++) {
-    const el = document.createElement('div'); el.className = 'armor'; el.textContent = 'ARMORED / БРОНЯ';
+    const el = document.createElement('div'); el.className = 'armor'; el.textContent = tx('lbl.armored');
     $('tgts').appendChild(el); armorEls.push(el);
   }
   toScreen(p, SCR2);
@@ -1981,7 +1983,7 @@ function updatePunish(b, dt, time) {
     b.punRec = { i: BOATS.indexOf(b), teleAt: +G.t.toFixed(3), fireAt: null, dodged: null, shots: 0, hits: 0, dmg: 0, dist: +b.deck.distanceTo(shipPos).toFixed(1) };
     PUN.log.push(b.punRec); if (PUN.log.length > 60) PUN.log.shift();
     audio.punishAlarm(panOf(b.gun));
-    showMsg('POINT-BLANK — DIVE OR JINK!', 'В УПОР — НЫРЯЙ ИЛИ УХОДИ!', 0.9, '#ff7a5a');
+    showMsg(tx('msg.pointBlank'), 0.9, '#ff7a5a');
   }
   threat(b, b.deck);
   if (b.pun === 'tele') {
@@ -2130,7 +2132,7 @@ function resolveBoatScan(dt, time) {
     if (b.scan !== 'catch' && b.scan !== 'lock') {
       b.scan = 'catch'; b.scanT = acq; b.scanBeep = 0;
       audio.scanCatch(panOf(b.mast));
-      if (TUT.phase !== 'active') showMsg('BOAT SCAN — DIVE', 'КАТЕР СКАНИРУЕТ — НЫРЯЙ', 1.15, '#ffd39a');
+      if (TUT.phase !== 'active') showMsg(tx('hud.dampScan'), 1.15, '#ffd39a');
     }
     if (b.scan === 'catch') {
       b.scanT -= dt;
@@ -2139,7 +2141,7 @@ function resolveBoatScan(dt, time) {
         const tutSoft = b === TUT.boat && TUT.phase === 'active' && !TUT.dived;
         b.scanCap = tutSoft ? SCAN_CAP_TUT : (b.easy || b === TUT.boat) ? SCAN_CAP_EASY : SCAN_CAP;
         audio.scanLock(panOf(b.mast));
-        if (TUT.phase !== 'active') showMsg('ENGINES DAMPED — DIVE', 'ДВИГАТЕЛИ ГЛУШАТ — НЫРЯЙ', 1.35, '#ffb15e');
+        if (TUT.phase !== 'active') showMsg(tx('hud.dampLock'), 1.35, '#ffb15e');
       }
     }
     if (b.scan === 'lock') {
@@ -2525,9 +2527,9 @@ function updateNaval(dt, time) {
   }
 }
 function hint(kind) {
-  if (kind === 'mine' && !G.mineHinted) { G.mineHinted = true; toast('<b>Mines below — shoot them or steer clear.</b><br><i>Мины под водой — сбей или обойди.</i>', 5); }
-  if (kind === 'hunter' && !G.hunterHinted) { G.hunterHinted = true; toast('<b>Hunters live underwater — shoot them while diving.</b><br><i>Охотники только под водой — стреляй в нырке.</i>', 5); }
-  if (kind === 'boat' && !G.boatHinted) { G.boatHinted = true; toast('<b>Boats: dive, then fire a torpedo [R]</b><br><i>Нырни и пускай торпеду [R]</i>', 5.5); }
+  if (kind === 'mine' && !G.mineHinted) { G.mineHinted = true; toast(tx('toast.mines'), 5); }
+  if (kind === 'hunter' && !G.hunterHinted) { G.hunterHinted = true; toast(tx('toast.hunters'), 5); }
+  if (kind === 'boat' && !G.boatHinted) { G.boatHinted = true; toast(tx('toast.boats'), 5.5); }
 }
 
 // ------------------------------------------------------------------ round 16: mission structure — acts + the LETHE gate finale
@@ -2543,18 +2545,18 @@ GATE_CORES.forEach((c, i) => {
 const isCore = (o) => !!(o && o.gate);
 const CORE_PTS = 600, GATE_PTS = 1500;
 const ACTS = [
-  { s: 200, en: 'ACT I · THE NARROWS', ru: 'АКТ I · ТЕСНИНЫ', sub: 'Drones mark you · rim turrets fire', subRu: 'Дроны метят · турели стреляют' },
-  { s: 2700, en: 'ACT II · DEEP WATER', ru: 'АКТ II · ГЛУБОКАЯ ВОДА', sub: 'Mines, hunters and patrol boats', subRu: 'Мины, охотники и патрульные катера' },
-  { s: 5300, en: "ACT III · LETHE'S REACH", ru: 'АКТ III · ВЛАДЕНИЯ ЛЕТЫ', sub: 'LETHE is awake — everything at once', subRu: 'ЛЕТА проснулась — всё сразу' },
-  { s: GATE_S - 720, en: 'FINALE · THE GATE', ru: 'ФИНАЛ · ВРАТА', sub: 'Break the gate — three generators', subRu: 'Сломай врата — три генератора' },
+  { s: 200, key: 'act.1' },
+  { s: 2700, key: 'act.2' },
+  { s: 5300, key: 'act.3' },
+  { s: GATE_S - 720, key: 'act.4' },
 ];
-ACTS.forEach((a, i) => { if (i) routeTick(a.s, 'at', a.en); });
+const actTicks = ACTS.map((a, i) => (i ? routeTick(a.s, 'at', tx(a.key)) : null));
 function actAt(s) { let a = -1; for (let i = 0; i < ACTS.length; i++) if (s >= ACTS[i].s) a = i; return a; }
 let actT = 0;
 function showAct(i) {
   const a = ACTS[i];
   if (!a || !hud.act) return;
-  hud.act.innerHTML = `<b>${a.en}</b><span>${a.ru}</span><i>${a.sub} · ${a.subRu}</i>`;
+  hud.act.innerHTML = `<b>${tx(a.key)}</b><i>${tx(a.key + 's')}</i>`;
   hud.act.classList.remove('on'); void hud.act.offsetWidth; hud.act.classList.add('on');
   actT = 3.6;
   audio.actSting?.();
@@ -2588,20 +2590,20 @@ function hitCore(c, dmg, p) {
   lightFlash(c.wp, 400, 0.4, 1, 0.4, 0.2);
   G.shake = Math.min(1.4, G.shake + 0.6);
   const left = GATE.cores.filter((x) => x.alive).length;
-  popScore(`+${CORE_PTS} GENERATOR / ГЕНЕРАТОР`);
+  popScore(`+${CORE_PTS} ${tx('lbl.core')}`);
   if (left > 0) {
-    showMsg(`GENERATOR DOWN — ${left} LEFT`, `ГЕНЕРАТОР УНИЧТОЖЕН — ОСТАЛОСЬ ${left}`, 2, '#ffb070');
+    showMsg(tx('msg.genDown', { n: left }), 2, '#ffb070');
     const uw = GATE.cores.find((x) => x.alive && x.under);
-    if (uw && left === 1) toast('<b>Last generator is underwater — DIVE and shoot it.</b><br><i>Последний генератор под водой — НЫРЯЙ и стреляй.</i>', 5, true);
+    if (uw && left === 1) toast(tx('toast.lastGen'), 5, true);
   } else gateDown();
 }
 function gateDown() {
   GATE.up = false; GATE.downT = 0; GATE.hold = false;
   G.gateT = G.t;
   G.score += GATE_PTS;
-  showMsg('GATE DOWN — FLY TO SETTLEMENT B', 'ВРАТА ПАЛИ — ЛЕТИ В ПОСЁЛОК Б', 3, '#9ff2d8');
-  popScore(`+${GATE_PTS} LETHE GATE / ВРАТА`);
-  toast('LETHE: <em>“…no. NO.”</em> &nbsp;/&nbsp; ЛЕТА: <em>«…нет. НЕТ.»</em>', 3.5, true);
+  showMsg(tx('msg.gateDown'), 3, '#9ff2d8');
+  popScore(`+${GATE_PTS} ${tx('lbl.gate')}`);
+  toast(tx('toast.letheNo'), 3.5, true);
   audio.collapse();
 }
 function updateGate(dt, time) {
@@ -2642,8 +2644,8 @@ function updateGate(dt, time) {
   const dist = GATE_S - G.s;
   if (GATE.up && !GATE.said && dist < 640) {
     GATE.said = true;
-    showMsg('LETHE GATE — DESTROY 3 GENERATORS', 'ВРАТА ЛЕТЫ — УНИЧТОЖЬ 3 ГЕНЕРАТОРА', 3, '#ff8a5a');
-    toast('<b>The gate field stops you. Shoot its generators — one is underwater (dive).</b><br><i>Поле врат не пустит. Сбей генераторы — один под водой (ныряй).</i>', 6, true);
+    showMsg(tx('msg.gate'), 3, '#ff8a5a');
+    toast(tx('toast.gate'), 6, true);
   }
   if (!GATE.up || dist > 480 || dist < -20) return;
   // generator fire: air cores shoot red bolts while the ship is above water, the underwater core shoots cyan ones below;
@@ -2671,12 +2673,12 @@ function updateGate(dt, time) {
 // Passing a checkpoint stores cargo / health / shield / rockets. On a crash the ship respawns there after ~2 s with at
 // least 40 % cargo and 60 % health, full air and ~3 s of protection. Everything already destroyed stays destroyed
 // (incl. gate generators); crashes are counted on the result screen. ?cp=0 restores the old "crash ends the run".
-const cpTicks = CHECKPOINTS.map((c, i) => (i ? routeTick(c, 'cp', `CHECKPOINT ${i}`) : null));
+const cpTicks = CHECKPOINTS.map((c, i) => (i ? routeTick(c, 'cp', tx('lbl.checkpoint', { i })) : null));
 const CP_N = CHECKPOINTS.length - 1;
 function cpSnapshot() { return { cargo: G.cargo, health: G.health, shield: G.shield, rockets: G.rockets }; }
 function cpCue(i) {
   if (hud.cpCue) {
-    hud.cpCue.innerHTML = `<b>CHECKPOINT ${i}/${CP_N}</b><span>ЧЕКПОИНТ ${i}/${CP_N}</span>`;
+    hud.cpCue.innerHTML = `<b>${tx('cp.cue', { i, n: CP_N })}</b>`;
     hud.cpCue.classList.remove('on'); void hud.cpCue.offsetWidth; hud.cpCue.classList.add('on');
   }
   audio.beep(1320); setTimeout(() => audio.beep(1760), 110);
@@ -2707,7 +2709,7 @@ function updateCheckpoints(dt, time) {
 function respawn() {
   const i = Math.max(0, G.cp), c = CHECKPOINTS[i], snap = G.cpSnap || { cargo: 100, health: 100, shield: SHIELD_MAX, rockets: ROCKET_AMMO };
   endTutorial(); endIntro();
-  G.phase = 'flight'; G.phaseT = 0; G.outcome = null; G.reason = ''; G.respawn = false;
+  G.phase = 'flight'; G.phaseT = 0; G.outcome = null; G.reason = ''; G.reasonKey = null; G.respawn = false;
   G.s = c; G.lat = 0; G.y = 12; G.vY = 0; G.vLat = 0; G.speed = 45; G.boost = 0;
   G.dive = false; G.underwater = false; G.wasUnder = false; G.air = 60; G.airOut = false; G.dip = 0; G.apDiveT = 0;
   G.yaw = 0; G.pitch = 0; G.roll = 0; G.hitCd = 0; G.rad = 0; G.bedHits = 0; G.bedScrapes = 0;
@@ -2724,7 +2726,7 @@ function respawn() {
   for (const b of BOATS) if (b.alive && b.fire && b.fire !== 'idle') { b.fire = 'idle'; b.cd = 3; }
   threats.clear();
   camInit = false;
-  showMsg(i ? `CHECKPOINT ${i} — RESPAWN` : 'RESPAWN — START', i ? `ЧЕКПОИНТ ${i} — ВОЗВРАТ` : 'ВОЗВРАТ НА СТАРТ', 2, '#9ff2d8');
+  showMsg(i ? tx('msg.cpRespawn', { i }) : tx('msg.startRespawn'), 2, '#9ff2d8');
   if (i) cpTicks[i]?.classList.add('on');
 }
 
@@ -2916,7 +2918,7 @@ function updateHazards(dt) {
         if (G.beepT <= 0) { audio.beep(G.air < 6 ? 1100 : 880); G.beepT = G.air < 6 ? 0.45 : 1; }
       }
       if (G.air <= 0) {
-        if (!G.airOut) { G.airOut = true; showMsg('OUT OF AIR — SURFACING', 'ВОЗДУХ КОНЧИЛСЯ — ВСПЛЫТИЕ', 2, '#7ff'); }
+        if (!G.airOut) { G.airOut = true; showMsg(tx('msg.airOut'), 2, '#7ff'); }
         G.dive = false;
         G.health -= 8 * dt;
       }
@@ -2937,7 +2939,7 @@ function updateHazards(dt) {
       if (G.shield <= 0) { audio.shieldDown(); hud.sDown.classList.remove('on'); void hud.sDown.offsetWidth; hud.sDown.classList.add('on'); }
     }
     G.health -= G.rad * 5.5 * soak * dt;
-    if (exposed && z !== G.lastZone) showMsg('NO FIELD — RADIATION', 'НЕТ ПОЛЯ — РАДИАЦИЯ · НЫРЯЙТЕ', 2.4, '#ff6a4a');
+    if (exposed && z !== G.lastZone) showMsg(tx('msg.noField'), 2.4, '#ff6a4a');
     G.lastZone = exposed ? z : null;
     if (G.rad > 0.02 && audio.ctx) {
       const rate = 4 + 55 * G.rad;
@@ -2945,7 +2947,7 @@ function updateHazards(dt) {
       while (Math.random() < k) { audio.click(); k -= 1; }
     }
     if (G.invuln > 0) G.health = Math.max(G.health, 1);
-    if (G.health <= 0) { G.health = 0; fail('PILOT INCAPACITATED', 'ПИЛОТ ПОТЕРЯЛ СОЗНАНИЕ'); }
+    if (G.health <= 0) { G.health = 0; fail('fail.pilot'); }
   } else {
     G.rad *= Math.exp(-dt * 3);
   }
@@ -2985,11 +2987,11 @@ function updateBurn(dt) {
   G.steam += (st - G.steam) * damp(4, dt);
   if (G.burnRate > 0 && G.boost > 0.05 && !G.burnHinted) {
     G.burnHinted = true;
-    toast('<b>Boost burns cargo water as reaction mass.</b><br><i>Форсаж тратит воду из цистерны как рабочее тело.</i>', 5);
+    toast(tx('toast.boost'), 5);
   }
   if (G.thinAir && !G.thinHinted) {
     G.thinHinted = true;
-    toast('<b>Thin air over a downed mast — ship sinks, engines draw water.</b><br><i>Над сбитой мачтой воздух жидкий: корабль проседает, двигатели пьют воду.</i>', 5.5);
+    toast(tx('toast.thin'), 5.5);
   }
 }
 
@@ -3311,8 +3313,9 @@ function viewLOS(a, b, s0) {
   return true;
 }
 const TGT_N = 10, TGT_RANGE = 260, TGT_RANGE_UW = 95;
-const TGT_LABEL = { turret: 'TURRET / ТУРЕЛЬ', drone: 'DRONE / ДРОН', beacon: 'RELAY / РЕТРАНСЛЯТОР', mine: 'MINE / МИНА', hunter: 'HUNTER / ОХОТНИК',
-  boat: 'BOAT / КАТЕР · ARMORED', weak: 'WEAK POINT / УЯЗВИМОЕ МЕСТО', core: 'GENERATOR / ГЕНЕРАТОР' };
+const TGT_KEY = { turret: 'lbl.turret', drone: 'lbl.drone', beacon: 'lbl.relay', mine: 'lbl.mine', hunter: 'lbl.hunter',
+  boat: 'lbl.boat', weak: 'lbl.weak', core: 'lbl.core' };
+const tgtLabel = (k) => (k === 'boat' ? `${tx('lbl.boat')} · ${tx('lbl.armored')}` : tx(TGT_KEY[k]));
 const TGT_R = { turret: 2.6, drone: 2.4, beacon: 2.2, mine: 1.8, hunter: 1.6, boat: 5, weak: 2.2, core: 3 };
 const tgtEls = [], mtagEls = [];
 for (let i = 0; i < TGT_N; i++) {
@@ -3320,7 +3323,7 @@ for (let i = 0; i < TGT_N; i++) {
   $('tgts').appendChild(el); tgtEls.push({ el, span: el.firstChild, hp: el.lastChild.firstChild, hpV: -1, label: '', aim: false, kind: '', torp: false });
 }
 for (let i = 0; i < 2; i++) {
-  const el = document.createElement('div'); el.className = 'mtag'; el.innerHTML = '<span>DO NOT HIT / НЕ СТРЕЛЯТЬ</span>';
+  const el = document.createElement('div'); el.className = 'mtag'; el.innerHTML = `<span>${tx('lbl.doNotHit')}</span>`;
   $('tgts').appendChild(el); mtagEls.push(el);
 }
 const tgtCand = [];
@@ -3370,15 +3373,15 @@ function updateMarkers(rdt) {
         G.seen[c.kind] = { o: c.o, t: 4.5 };
         if (c.kind === 'turret' && !G.turretHinted && !introArmed('turret')) {
           G.turretHinted = true;
-          toast('<b>Turrets on the rims fire when a drone marks you.</b> Shoot them or the drone.<br><i>Турели стреляют по метке дрона — сбей их или дрон.</i>', 6);
+          toast(tx('toast.turrets'), 6);
         }
         if (c.kind === 'beacon' && !G.relayHinted) {
           G.relayHinted = true;
-          toast('<b>Relays pass drone marks to turrets.</b> Shoot the relay first — the section goes blind.<br><i>Ретрансляторы передают метку турелям. Сбей ретранслятор — сектор ослепнет.</i>', 6);
+          toast(tx('toast.relays'), 6);
         }
       }
-      const label = c.kind === 'boat' ? `КАТЕР / BOAT · ${Math.round(c.d)} m${seen && seen.o === c.o && seen.t > 0 ? ' · ARMORED' : ''}`
-        : torp ? `TORPEDO LOCK / ТОРПЕДА · ${Math.round(c.d)} m` : c.kind === 'weak' || c.kind === 'core' || (seen && seen.o === c.o && seen.t > 0) ? TGT_LABEL[c.kind] : '';
+      const label = c.kind === 'boat' ? `${tx('lbl.boat')} · ${Math.round(c.d)} ${tx('unit.m')}${seen && seen.o === c.o && seen.t > 0 ? ' · ' + tx('lbl.armored') : ''}`
+        : torp ? `${tx('lbl.torpLock')} · ${Math.round(c.d)} ${tx('unit.m')}` : c.kind === 'weak' || c.kind === 'core' || (seen && seen.o === c.o && seen.t > 0) ? tgtLabel(c.kind) : '';
       if (label !== m.label) { m.label = label; m.span.textContent = label; }
       const aim = c.o === aimObj;
       if (aim !== m.aim) { m.aim = aim; m.el.classList.toggle('aim', aim); }
@@ -3448,7 +3451,7 @@ function updateHUD(dt, time) {
   if (burning !== hud.rowCargo.classList.contains('burn')) hud.rowCargo.classList.toggle('burn', burning);
   if (burning && thinTag !== hud.burnTag.classList.contains('thin')) {
     hud.burnTag.classList.toggle('thin', thinTag);
-    hud.burnTag.innerHTML = thinTag ? 'THIN AIR · WATER BURN<i>РАЗРЕЖЕННЫЙ ВОЗДУХ · РАСХОД ВОДЫ</i>' : 'WATER BURN<i>РАСХОД ВОДЫ</i>';
+    hud.burnTag.textContent = tx(thinTag ? 'hud.thinBurn' : 'hud.burn');
   }
   hud.rowShield.classList.toggle('down', G.shield <= 0);
   const locked = G.lock.phase === 'laser' || G.lock.phase === 'volley';
@@ -3458,7 +3461,7 @@ function updateHUD(dt, time) {
   hud.markBox.classList.toggle('lock', !noRelay && (G.mark >= 1 || locked));
   if (noRelay !== hud.markBox.classList.contains('norelay')) {
     hud.markBox.classList.toggle('norelay', noRelay);
-    hud.markLbl.innerHTML = noRelay ? 'NO RELAY <i>/ НЕТ СВЯЗИ</i>' : 'MARK <i>/ МЕТКА</i>';
+    hud.markLbl.textContent = tx(noRelay ? 'hud.noRelay' : 'hud.mark');
   }
   hud.tintLock.style.opacity = locked ? 0.6 + 0.4 * Math.sin(time * 20) : G.mark * (noRelay ? 0.08 : 0.35);
   hud.airBox.style.opacity = G.underwater || G.air < 59.5 ? 1 : 0;
@@ -3474,9 +3477,7 @@ function updateHUD(dt, time) {
   if (scanShow !== hud.dampCue.classList.contains('on')) hud.dampCue.classList.toggle('on', scanShow);
   if (scanShow && hud.dampPhase !== G.scanPhase) {
     hud.dampPhase = G.scanPhase;
-    hud.dampCue.innerHTML = G.scanPhase === 'lock'
-      ? 'ENGINES DAMPED — DIVE<i>ДВИГАТЕЛИ ГЛУШАТ — НЫРЯЙ</i>'
-      : 'BOAT SCAN — DIVE<i>КАТЕР СКАНИРУЕТ — НЫРЯЙ</i>';
+    hud.dampCue.textContent = tx(G.scanPhase === 'lock' ? 'hud.dampLock' : 'hud.dampScan');
   }
   const pips = hud.pips.children;
   for (let i = 0; i < pips.length; i++) pips[i].classList.toggle('off', i >= G.rockets);
@@ -3509,32 +3510,41 @@ function updateHUD(dt, time) {
   if (hudT > 0) return;
   hudT = 0.1;
   hud.cargo.textContent = G.burnRate > 0 ? G.cargo.toFixed(1) + '%' : Math.ceil(G.cargo) + '%';
-  hud.shield.textContent = G.shield > 0 ? Math.ceil(G.shield) + '%' : 'DOWN';
+  hud.shield.textContent = G.shield > 0 ? Math.ceil(G.shield) + '%' : tx('hud.down');
   hud.health.textContent = Math.ceil(Math.max(0, G.health)) + '%';
-  hud.rad.textContent = G.rad > 0.05 ? (G.rad * 4.2).toFixed(1) + ' Sv/h' : 'SHIELDED';
+  hud.rad.textContent = G.rad > 0.05 ? (G.rad * 4.2).toFixed(1) + ' ' + tx('unit.svh') : tx('hud.shielded');
   hud.rad.style.color = G.rad > 0.05 ? '#ff6a4a' : '#9ff';
-  hud.mark.textContent = locked ? 'LOCK' : G.noRelay ? '—' : Math.round(G.mark * 100) + '%';
+  hud.mark.textContent = locked ? tx('hud.lock') : G.noRelay ? '—' : Math.round(G.mark * 100) + '%';
   hud.score.textContent = G.score;
   hud.speed.textContent = Math.round(G.speed * (1 - G.dip) * 3.6);
   hud.dist.textContent = (Math.max(0, PAD_B - G.s) / 1000).toFixed(2);
-  hud.air.textContent = Math.ceil(G.air) + 's';
+  hud.air.textContent = Math.ceil(G.air) + tx('unit.s');
   hud.rockets.textContent = G.rockets;
 }
 
 // ------------------------------------------------------------------ result / screens
+const set = (id, v) => { const e = $(id); if (e) e.textContent = v; };   // null-guarded: never crash on an older index.html
+const litres = (pct) => Math.round(pct / 100 * TANK_L / 10) * 10;
+const fmtL = (l) => String(l).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009') + '\u00a0' + tx('unit.l');
+// round 25: the language-dependent part of the result screen (re-run on a language switch)
+function resultText() {
+  const ok = G.outcome === 'delivered';
+  set('rTitle', tx(ok ? 'res.ok' : 'res.fail'));
+  const rt = $('rTitle'); if (rt) { rt.className = ok ? '' : 'bad'; delete rt.dataset.i18n; }
+  set('rSub', ok ? tx('res.okSub') : (G.reasonKey ? tx(G.reasonKey) : G.reason));
+  const deliv = ok ? G.cargo : 0;
+  set('rGate', G.gateT != null ? tx('st.gateBroken') : `${G.coreKills} / ${GATE.cores.length}`);
+  set('rWater', `${fmtL(litres(deliv))} (${Math.round(deliv)}%)`);
+  set('rBurned', `${fmtL(litres(G.waterBurned))} (${G.waterBurned.toFixed(1)}%)`);
+}
 function showResult() {
   G.phase = 'result';
   const ok = G.outcome === 'delivered';
   const timeBonus = ok ? Math.max(0, Math.round((200 - G.t) * 15)) : 0;
   G.finalScore = Math.max(0, G.score + (ok ? Math.round(G.cargo) * 20 + Math.round(G.health) * 10 + timeBonus : 0));
-  const set = (id, v) => { const e = $(id); if (e) e.textContent = v; };   // null-guarded: never crash on an older index.html
-  set('rTitle', ok ? 'MISSION COMPLETE' : 'MISSION FAILED');
-  const rt = $('rTitle'); if (rt) rt.className = ok ? '' : 'bad';
-  set('rSub', ok ? 'МИССИЯ ВЫПОЛНЕНА · Gate broken — settlement B has water tonight' : 'МИССИЯ ПРОВАЛЕНА · ' + G.reason);
+  resultText();
   const mm = Math.floor(G.t / 60), ss = (G.t % 60).toFixed(1).padStart(4, '0');
   set('rTime', `${mm}:${ss}`);
-  const litres = (pct) => Math.round(pct / 100 * TANK_L / 10) * 10;
-  const fmtL = (l) => String(l).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009') + '\u00a0л';
   const deliv = ok ? G.cargo : 0;
   // round 16 headline stats
   G.killsTotal = G.kills + G.mineKills + G.hunterKills + G.boatKills + G.coreKills;
@@ -3543,10 +3553,7 @@ function showResult() {
   G.accuracy = G.shots ? Math.min(100, Math.round(G.shotHits / G.shots * 100)) : 0;
   set('rAcc', G.shots ? `${G.accuracy}% (${G.shotHits}/${G.shots})` : '—');
   set('rDeaths', `${G.deaths}`);
-  set('rGate', G.gateT != null ? 'BROKEN / СЛОМАНЫ' : `${G.coreKills} / ${GATE.cores.length}`);
   set('rCargo', Math.round(G.cargo) + '%');
-  set('rWater', `${fmtL(litres(deliv))} (${Math.round(deliv)}%)`);
-  set('rBurned', `${fmtL(litres(G.waterBurned))} (${G.waterBurned.toFixed(1)}%)`);
   set('rHealth', Math.round(Math.max(0, G.health)) + '%');
   set('rTargets', `${G.kills} / ${N_DRONE_REAL + BEACONS.length + TURRETS.length}`);
   set('rMasts', `${G.mastsBroken}`);
@@ -3610,7 +3617,7 @@ function startGame() {
   if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   try { renderer.domElement.focus({ preventScroll: true }); window.focus(); } catch (e) { /* ignore */ }
   G.phase = 'takeoff'; G.phaseT = 0; G.t = 0;
-  showMsg('TAKEOFF — SETTLEMENT A', 'ВЗЛЁТ — ПОСЕЛЕНИЕ А', 2.2);
+  showMsg(tx('msg.takeoff'), 2.2);
 }
 // round 23: fullscreen (hides the Android Chrome address bar) + landscape lock where supported; silent no-op on iPhone
 const fsRoot = document.documentElement;
@@ -3655,7 +3662,7 @@ hud.snd.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventD
 const engSeg = document.querySelector('#engSel .seg');
 for (const e of ENGINES) {
   const b = document.createElement('button');
-  b.type = 'button'; b.dataset.e = e.id; b.innerHTML = `${e.en}<small>${e.ru}</small>`;
+  b.type = 'button'; b.dataset.e = e.id; b.dataset.i18n = 'eng.' + e.id; b.textContent = tx('eng.' + e.id);
   b.addEventListener('click', (ev) => { ev.stopPropagation(); audio.init(); setEngine(e.id); audio.preview(); b.blur(); });
   b.addEventListener('keydown', (ev) => ev.stopPropagation());
   engSeg.appendChild(b);
@@ -3663,14 +3670,14 @@ for (const e of ENGINES) {
 function syncEngine() {
   for (const b of engSeg.children) b.classList.toggle('on', b.dataset.e === audio.engine);
   const info = audio.engineInfo();
-  hud.engBtn.title = `Engine sound (V): ${info.en} / ${info.ru}`;
+  hud.engBtn.title = tx('hud.engineTitle', { name: tx('eng.' + info.id) });
 }
 function setEngine(name, announce = false) {
   audio.setEngine(name);
   syncEngine();
   if (announce) {
     const info = audio.engineInfo();
-    toast(`ENGINE SOUND · <b>${info.en}</b> <i>/ ${info.ru}</i>`, 1.6, true);
+    toast(tx('toast.engine', { name: tx('eng.' + info.id) }), 1.6, true);
   }
 }
 function cycleEngine() {
@@ -3697,7 +3704,7 @@ const musSeg = document.querySelector('#musSel .seg');
 function syncMusic() { if (musSeg) for (const b of musSeg.children) b.classList.toggle('on', (b.dataset.v === '1') === audio.musicOn); }
 function setMusic(on, announce = false) {
   audio.init(); audio.setMusic(on); syncMusic();
-  if (announce) toast(`MUSIC · <b>${on ? 'ON' : 'OFF'}</b> <i>/ МУЗЫКА ${on ? 'ВКЛ' : 'ВЫКЛ'}</i>`, 1.4, true);
+  if (announce) toast(tx('toast.music', { v: tx(on ? 'set.on' : 'set.off') }), 1.4, true);
 }
 if (musSeg) for (const b of musSeg.children) {
   b.addEventListener('click', (ev) => { ev.stopPropagation(); setMusic(b.dataset.v === '1'); b.blur(); });
@@ -3714,12 +3721,36 @@ function setStyle(id) {
 }
 if (styleSeg) for (const st of MUSIC_STYLES) {
   const b = document.createElement('button');
-  b.type = 'button'; b.dataset.s = st.id; b.innerHTML = `${st.en}<small>${st.ru}</small>`;
+  b.type = 'button'; b.dataset.s = st.id; b.dataset.i18n = 'style.' + st.id; b.textContent = tx('style.' + st.id);
   b.addEventListener('click', (ev) => { ev.stopPropagation(); setStyle(st.id); b.blur(); });
   b.addEventListener('keydown', (ev) => ev.stopPropagation());
   styleSeg.appendChild(b);
 }
 syncStyle();
+// round 25: language picker (start screen, native names) + live re-localisation of everything built from JS
+const langPick = $('langPick');
+if (langPick) {
+  for (const l of LANGS) { const o = document.createElement('option'); o.value = l.code; o.textContent = l.name; o.lang = l.code; langPick.appendChild(o); }
+  langPick.value = getLang();
+  langPick.addEventListener('change', () => { setLang(langPick.value); audio.click?.(); langPick.blur(); });
+  for (const ev of ['click', 'pointerdown', 'keydown']) $('langBox').addEventListener(ev, (e) => e.stopPropagation());
+}
+onLang((code) => {
+  if (langPick) langPick.value = code;
+  const q = $('qual'); if (q) q.textContent = tx('hud.quality', { q: quality.toUpperCase() });
+  syncEngine();
+  if (gateTick) gateTick.title = tx('lbl.gate');
+  actTicks.forEach((el, i) => { if (el) el.title = tx(ACTS[i].key); });
+  cpTicks.forEach((el, i) => { if (el) el.title = tx('lbl.checkpoint', { i }); });
+  const bs = $('brackets').querySelector('.brk span'); if (bs) bs.textContent = tx('lbl.spotterTag');
+  for (const el of mtagEls) el.firstChild.textContent = tx('lbl.doNotHit');
+  for (const el of armorEls) el.textContent = tx('lbl.armored');
+  for (const m of tgtEls) m.label = null;   // marker tags re-render next frame
+  hud.markLbl.textContent = tx(hud.markBox.classList.contains('norelay') ? 'hud.noRelay' : 'hud.mark');
+  hud.burnTag.textContent = tx(hud.burnTag.classList.contains('thin') ? 'hud.thinBurn' : 'hud.burn');
+  hud.dampPhase = null;
+  if (G.phase === 'result') resultText();
+});
 hud.engBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); cycleEngine(); });
 // leaving mid-flight (e.g. Ctrl+W while Ctrl is the dive key) asks first
 addEventListener('beforeunload', (e) => {
@@ -3853,12 +3884,7 @@ function endTutorial() {
 // Zone 0 has drones only, zone 1 a single rim turret only (world.js). The first time each one comes into view a big
 // prompt (same style as the boat tutorial) explains it under a light slow-mo; shown once per device while TIPS is on.
 const INTRO_SLOW = 0.5, INTRO_DUR = 3.2;
-const INTRO_TXT = {
-  drone: { ru: 'Дрон — сбей его', en: 'DRONE — SHOOT IT DOWN', key: '<span class="dk">hold <kbd>Space</kbd> / <kbd>LMB</kbd> to fire <i>· зажми огонь</i></span><span class="tt">hold <b>FIRE</b> <i>· зажми ОГОНЬ</i></span>',
-    sub: 'drones are LETHE\'s eyes — they mark you for the turrets. Or dive to hide.<i>дроны — глаза ЛЕТЫ, метят тебя для турелей. Или нырни.</i>' },
-  turret: { ru: 'Турель на краю — сбей её', en: 'RIM TURRET — SHOOT IT', key: '<span class="dk">climb <kbd>W</kbd>, aim up, hold <kbd>Space</kbd> <i>· набери высоту и стреляй</i></span><span class="tt">climb, hold <b>FIRE</b> <i>· вверх и ОГОНЬ</i></span>',
-    sub: 'alone it fires blind — with a drone\'s mark it hits hard. Weave and dive.<i>без метки дрона стреляет вслепую, с меткой — точно. Маневрируй и ныряй.</i>' },
-};
+const INTRO_TXT = { drone: 'intro.drone', turret: 'intro.turret' };   // round 25: i18n key prefixes (.title .keyD .keyT .sub)
 const INTRO = { kind: null, t: 0, shown: [] };
 const introArmed = (k) => tipsOn && lsGet(INTRO_KEYS[k]) !== '1' && G.phase === 'flight' && TUT.phase !== 'active' && !INTRO.kind;
 function startIntro(k) {
@@ -3866,7 +3892,7 @@ function startIntro(k) {
   INTRO.kind = k; INTRO.t = 0; INTRO.shown.push(k);
   lsSet(INTRO_KEYS[k], '1');
   if (hud.intro) {
-    hud.intro.innerHTML = `<div class="tl">${T.ru}</div><div class="te">${T.en}</div><div class="tx"><div class="tk">${T.key}</div><div class="tc">${T.sub}</div></div>`;
+    hud.intro.innerHTML = `<div class="tl">${tx(T + '.title')}</div><div class="tx"><div class="tk"><span class="dk">${tx(T + '.keyD')}</span><span class="tt">${tx(T + '.keyT')}</span></div><div class="tc">${tx(T + '.sub')}</div></div>`;
     hud.intro.classList.add('on');
   }
   audio.tutorialSting();
@@ -4095,6 +4121,7 @@ function camGap() {
   return +Math.min(wallLat(pr.s, y, 1) - pr.lat, wallLat(pr.s, y, -1) + pr.lat).toFixed(2);
 }
 window.__lethe = {
+  i18n,   // round 25: { lang, setLang(code), missing(), missingAll(), t(key, params), langs, keys() }
   state: () => ({
     t: +G.t.toFixed(2), speed: +G.speed.toFixed(2), distToB: +Math.max(0, PAD_B - G.s).toFixed(1), cargo: +G.cargo.toFixed(1), hull: +G.cargo.toFixed(1),
     health: +Math.max(0, G.health).toFixed(1), air: +G.air.toFixed(1), score: G.phase === 'result' ? G.finalScore : G.score,
@@ -4169,7 +4196,9 @@ window.__lethe = {
       return out.sort((a, b) => b[1] - a[1]);
     },
     hitCore: (i, d = 99) => hitCore(GATE.cores[i], d),
-    kill: () => fail('DEBUG', 'ОТЛАДКА'),
+    kill: () => fail('fail.debug'),
+    // round 25: jump straight to the result screen (stats layout / i18n checks); ok=false shows the failure variant
+    showResult: (ok = true) => { G.outcome = ok ? 'delivered' : 'failed'; if (!ok) { G.reasonKey = 'fail.cargo'; G.reason = tx('fail.cargo'); } showResult(); return G.phase; },
     gateWarp: (back = 300) => { G.s = GATE_S - back; G.y = 14; G.lat = 0; G.speed = 60; },
     breakMast: (i) => breakMast(MASTS[i]),
     setCargo: (v) => { G.cargo = clamp(v, 0, 100); disp.cargo = disp.gc = G.cargo; },
