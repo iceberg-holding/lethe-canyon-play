@@ -1,27 +1,30 @@
-import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js';
+import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r26';
 // LETHE / ЛЕТА — "Delivery" prototype. Game loop, flight model, shooting, shield, LETHE spotters
 // and turrets, hazards, camera, HUD, adaptive quality.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { clamp, lerp, damp, smoothstep } from './util.js';
+import { clamp, lerp, damp, smoothstep } from './util.js?v=r26';
 import {
   PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
   ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, zoneLinked, resetLevel,
   MINES, HUNTERS, BOATS, bedY, underLim, GATE_S, GATE_HOLD, GATE_BEAM, CHECKPOINTS,
-} from './world.js';
-import { buildGate, GATE_CORES, CORE_HP } from './gate.js';
+} from './world.js?v=r26';
+import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r26';
 import {
   buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP, BOAT_FEATURES,
-} from './naval.js';
+} from './naval.js?v=r26';
 import {
   buildChunks, buildWater, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS, FALLS,
-} from './terrain.js';
-import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js';
-import { Ship, makeEnvMap } from './ship.js';
-import { Audio, ENGINES, MUSIC_STYLES } from './audio.js';
-import { input, setupInput, pollInput } from './input.js';
-import { Post, QualityGovernor, TIERS } from './post.js';
-import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js';   // tx: `t` is a common local name here (phase timers, torpedoes)
+} from './terrain.js?v=r26';
+import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r26';
+import { Ship, makeEnvMap } from './ship.js?v=r26';
+import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r26';
+import { input, setupInput, pollInput } from './input.js?v=r26';
+import { Post, QualityGovernor, TIERS } from './post.js?v=r26';
+// round 26: build tag for cache-busting. Every relative import / the main script / the manifest carry ?v=<BUILD>;
+// tools/bump-build.sh <tag> rewrites them all (and this line) in one go.
+export const BUILD = 'r26';
+import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r26';   // tx: `t` is a common local name here (phase timers, torpedoes)
 applyDom();   // round 25: localise the static DOM before the first frame
 
 THREE.ColorManagement.enabled = false;
@@ -362,10 +365,11 @@ const hud = {
   air: $('tAir'), airBox: $('airBox'), msg: $('msg'), pop: $('pop'), toast: $('toast'), markBox: $('markBox'), markLbl: document.querySelector('#markBox .lbl span'), mark: $('tMark'), sDown: $('sDown'),
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
   dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'), tut: $('tut'),
-  pR: $('pR'), dampCue: $('dampCue'),
+  pR: $('pR'), dampCue: $('dampCue'), tankTick: $('tankTick'), breach: $('breachCue'),   // round 26
   act: $('act'), routeBar: $('routeBar'), intro: $('intro'), cpCue: $('cpCue'),   // round 16 (null-guarded: an old index.html must not crash the loop)
 };
 for (let i = 0; i < ROCKET_AMMO; i++) hud.pips.appendChild(document.createElement('i'));
+{ const bt = $('buildTag'); if (bt) bt.textContent = BUILD; }   // round 26: tiny build tag in the menu corner
 const zoneEls = ZONES.map((z) => {
   const el = document.createElement('div');
   el.className = 'z';
@@ -397,7 +401,7 @@ let G;
 function freshState() {
   return {
     phase: 'start', t: 0, s: PAD_A, lat: 0, y: PAD_TOP + 1.7, vLat: 0, vY: 0, speed: 0, boost: 0,
-    cargo: 100, health: 100, air: 60, score: 0, dive: false, underwater: false, hitCd: 0, rad: 0, bedHits: 0, bedScrapes: 0, bedT: -9,
+    cargo: 0, health: 100, air: 60, score: 0, dive: false, underwater: false, hitCd: 0, rad: 0, bedHits: 0, bedScrapes: 0, bedT: -9,
     yaw: 0, pitch: 0, roll: 0, phaseT: 0, fireCd: 0, gun: 0, shake: 0, hitFlash: 0,
     kills: 0, mastsBroken: 0, outcome: null, reason: '', finalScore: 0, wasUnder: false, lastZone: null,
     msgT: 0, popT: 0, beepT: 0, airOut: false, toastT: 0, toastQ: [], seen: {}, rkLog: [], turretHinted: false, legendT: 20,
@@ -411,7 +415,9 @@ function freshState() {
     waterBurned: 0, waterSpilled: 0, burnRate: 0, thinAir: false, steam: 0, burnHinted: false, thinHinted: false,
     dmgTaken: 0, uwCam: 0,
     scan: 0, scanWant: 0, scanCap: 62, scanPhase: 'off', scanBoat: -1, scanDrawn: 0,
-    act: -1, shots: 0, shotHits: 0, coreKills: 0, deaths: 0, gateT: null,   // round 16
+    act: -1, shots: 0, shotHits: 0, antKills: 0, deaths: 0, gateT: null,   // round 16
+    knockV: 0, retreatV: 0, gatePaid: false, bedSpillCd: 0, bedSpilled: 0, waterHitLoss: 0, intakeFull: false, fieldDrained: 0, fieldTouches: 0, gateShots: 0,   // round 26
+    waterGained: 0, diveGain: 0, surfT: 9, filling: false, fillTickT: 0, tickAcc: 0, tickT: 0, fullSaid: false, fillHinted: false, spillHinted: false, gurgleT: 0,
     cp: -1, cpSnap: null, invuln: 0, respawn: false,   // round 18
   };
 }
@@ -531,17 +537,31 @@ function shieldImpact(p) {
   ship.shieldMat.uniforms.uHitDir.value.copy(V4.normalize());
   G.shieldHit = 1;
 }
-// returns damage that got through to the hull/cargo
+// Round 26: the tank starts empty and only fills while submerged (see updateTank). Every hit spills water — the shield
+// soaks the damage itself, but SPILL_SHIELD % of the tank per damage point still sloshes out; what gets past the shield
+// hits the hull (G.health: 0 = crash -> checkpoint respawn) and spills SPILL_HULL % per point.
+const SPILL_SHIELD = 0.1, SPILL_HULL = 0.3, SPILL_MIN = 0.25;
+const BED_SPILL = 0.4, BED_SPILL_CD = 0.8;   // gentle riverbed scrape: water only (≈ 0.5 %/s while grinding along)
+function spillWater(absorbed, rest) {
+  if (G.cargo <= 0) return 0;
+  const want = absorbed * SPILL_SHIELD + rest * SPILL_HULL;
+  const d = Math.min(G.cargo, Math.max(SPILL_MIN, want));
+  G.cargo -= d; G.waterSpilled += d; G.waterHitLoss += d;
+  waterTick(-d);
+  if (!G.spillHinted && d > 0.2) { G.spillHinted = true; toast(tx('toast.spill'), 4.5); }
+  return d;
+}
+// returns damage that got through to the hull
 function damage(amount, p, kind) {
   if (G.phase === 'result' || G.phase === 'failed') return 0;
   if (G.invuln > 0) return 0;   // round 18: brief respawn protection
   G.hurtT = G.t;   // round 19: music intensity
   G.dmgTaken += amount;
   G.shieldCd = SHIELD_DELAY;
-  let rest = amount;
+  let rest = amount, absorbed = 0;
   if (G.shield > 0) {
     const a = Math.min(G.shield, amount);
-    G.shield -= a; rest = amount - a;
+    G.shield -= a; rest = amount - a; absorbed = a;
     shieldImpact(p || V4.copy(shipPos).addScaledVector(shipFwd, 6));
     G.shieldFlash = Math.min(1, G.shieldFlash + 0.5);
     audio.shieldHit();
@@ -553,14 +573,14 @@ function damage(amount, p, kind) {
       sparkBurst(shipPos, 30, [0.5, 1.4, 1.8]);
     }
   }
+  if (spillWater(absorbed, rest > 0.01 ? rest : 0) > 0) pulseRow(hud.rowCargo);
   if (rest > 0.01) {
-    G.waterSpilled += Math.min(G.cargo, rest);
-    G.cargo = Math.max(0, G.cargo - rest);
+    G.health = Math.max(0, G.health - rest);
     G.hitFlash = 1;
-    pulseRow(hud.rowCargo);
+    pulseRow(hud.rowHealth);
     audio.hit();
-    if (G.cargo <= 0) fail('fail.cargo');
-    else if (G.cargo < 30) showMsg(tx('msg.cargoCritical'), 1.4, '#ff8a5a');
+    if (G.health <= 0) fail('fail.hull');
+    else if (G.health < 30) showMsg(tx('msg.hullCritical'), 1.4, '#ff8a5a');
   }
   return rest;
 }
@@ -608,10 +628,12 @@ function autopilot(dt) {
     else if (bot > 7) ty = Math.min(ty, 2.5);
     else needDive = true;
   }
-  // round 16: at the gate, line up with a live generator (air ones first, then dive for the underwater one)
-  let gT = null;
-  if (GATE.up && GATE_S - G.s < 560) gT = GATE.cores.find((c) => c.alive && !c.under) || GATE.cores.find((c) => c.alive);
-  if (gT) { if (gT.under) needDive = true; else ty = gT.y; }
+  // round 26: at the gate, climb and line up with a live antenna; once the breach opens, drop into it and go
+  let gT = null, gLat = null;
+  if (!GATE.passed && GATE_S - G.s < 560) {
+    if (GATE.state === 'armed') { gT = GATE.ants.find((c) => c.alive); if (gT) { ty = 34; gLat = gT.lat; } }
+    else { ty = GATE.state === 'open' ? 9 : 16; gLat = 0; }
+  }
   let best = G.lat, bestC = 1e9;
   // low (skimming / diving): steer around mines and boat hulls too
   const low = ty < 7 || needDive || G.dive || G.apDiveT > 0 || G.y < 5;
@@ -639,11 +661,14 @@ function autopilot(dt) {
     }
     if (cost < bestC) { bestC = cost; best = lat; }
   }
-  if (gT) best = clamp(gT.lat, -wr * 0.75, wr * 0.75);
+  if (gLat !== null) best = clamp(gLat, -wr * 0.75, wr * 0.75);
   // evade a LETHE lock by diving (the canon escape)
   G.apDiveT = Math.max(0, G.apDiveT - dt);
   if (G.lock.phase === 'laser' && G.air > 12) G.apDiveT = 2.6;
-  const wantDive = needDive || G.apDiveT > 0;
+  // round 26: water runs — dive to fill the tank on the open river (until the dive's intake share is in), then surface
+  if (G.apWater) { if (G.intakeFull || G.cargo >= 99.5 || G.air < 18 || G.s > GATE_S - 600) G.apWater = false; }
+  else if (G.cargo < 92 && G.air > 50 && G.surfT > SURF_RESET + 0.3 && G.s > 400 && G.s < GATE_S - 700) G.apWater = true;
+  const wantDive = needDive || G.apDiveT > 0 || G.apWater;
   input.x = clamp((best - G.lat) * 0.12 - G.vLat * 0.04, -1, 1);
   input.y = clamp((ty - G.y) * 0.2 - G.vY * 0.05, -1, 1);
   if (wantDive !== G.dive && G.phase === 'flight') toggleDive();
@@ -670,7 +695,7 @@ function updateFlight(dt) {
     const t = G.phaseT;
     G.y = PAD_TOP + 1.7 + smoothstep(0.3, 2.6, t) * 9;
     G.speed = smoothstep(0.9, 2.8, t) * 45;
-    if (t > 2.8) { G.phase = 'flight'; showMsg(tx('msg.flyToB'), 2); }
+    if (t > 2.8) { G.phase = 'flight'; showMsg(tx('msg.flyToB'), 2); toast(tx('toast.tankEmpty'), 6); }
   } else if (G.phase === 'landing') {
     const rem = PAD_B - G.s;
     const ts = rem > 0.5 ? clamp(rem * 0.32, 4, 64) : 0;
@@ -681,7 +706,7 @@ function updateFlight(dt) {
     if (rem <= 0.6) { G.s = PAD_B; G.speed = 0; }
     if (rem < 1.2 && Math.abs(G.y - (PAD_TOP + 1.7)) < 0.25 && G.phaseT > 1) {
       G.phase = 'landed'; G.phaseT = 0; G.outcome = 'delivered';
-      showMsg(tx('msg.touchdown'), 3, '#9ff2d8');
+      if (G.cargo < DELIVER_MIN) showMsg(tx('msg.touchdownLow'), 3, '#ff9a80'); else showMsg(tx('msg.touchdown'), 3, '#9ff2d8');
     }
   } else if (G.phase === 'landed') {
     G.speed = 0; G.vLat = 0; G.vY = 0; G.y += (PAD_TOP + 1.7 - G.y) * damp(4, dt);
@@ -707,11 +732,16 @@ function updateFlight(dt) {
       latMax += (16 - latMax) * scanK;
       latK += (2.4 - latK) * scanK;
     }
-    // round 16: the gate's field holds the ship in a hover arena ~GATE_HOLD m in front of it until the generators fall
+    // round 16: the gate's field holds the ship in a hover arena ~GATE_HOLD m in front of it (round 26: while the breach
+    // is shut — once it opens the hold lets go so the ship can fly through)
     GATE.hold = false;
-    if (GATE.up) {
+    G.retreatV = 0;
+    if (GATE.up && !GATE.passed && GATE.state !== 'open') {
       const room = GATE_S - GATE_HOLD - G.s;
       if (room < 260) { aimSpd = Math.min(aimSpd, Math.max(0, room * 0.55)); spdK = Math.max(spdK, 2.2); GATE.hold = room < 90; }
+      // round 26 fix: inside the arena distance (a missed breach, a knock-back that fell short) the field eases the
+      // ship back out to ~GATE_HOLD m, so the antennas are never left directly overhead with no aim angle
+      if (room < -2) { G.retreatV = clamp(-room * 0.9, 4, 28); G.speed = Math.min(G.speed, 0); aimSpd = 0; }
     }
     G.speed += (aimSpd - G.speed) * damp(spdK, dt);
     G.vLat += (ix * latMax - G.vLat) * damp(latK, dt);
@@ -730,12 +760,18 @@ function updateFlight(dt) {
   const rt = G.recoilT;
   const env = rt < 0.06 ? rt / 0.06 : rt < 0.3 ? 1 : 1 - smoothstep(0.3, 0.85, rt);
   G.dip = 0.13 * env;
+  const sPrev = G.s;
   G.s += G.speed * (1 - G.dip) * dt;
+  // round 26: field knock-back (pushes the ship back along the canyon, decays in ~1 s)
+  if (G.knockV > 0.1) { G.s -= G.knockV * dt; G.knockV *= Math.exp(-dt * 1.6); } else G.knockV = 0;
+  if (G.retreatV > 0 && G.phase === 'flight') G.s -= G.retreatV * dt;
   G.lat += G.vLat * dt;
-  if (GATE.up && G.s > GATE_S - 10 && (G.phase === 'flight' || G.phase === 'failed')) {
-    G.s = GATE_S - 10; G.speed = 0;
-    GATE.bumpCd -= dt;
-    if (GATE.bumpCd <= 0 && G.phase === 'flight') { GATE.bumpCd = 1; hitCargo(8, V1.copy(shipPos).addScaledVector(shipFwd, 4).clone()); curtainHit(shipPos, 1); }
+  // round 26: the curtain. Swept test: the frame that carries the hull across the curtain plane (sPrev -> G.s) passes
+  // only if the breach is logically open and the hull is inside the notch (width + height checked on every frame of the
+  // approach, too); anywhere else within 6 m of the plane is field contact.
+  if (GATE.up && !GATE.passed && G.s > GATE_S - 6 && (G.phase === 'flight' || G.phase === 'failed')) {
+    if (!inBreach(G.lat, G.y)) fieldTouch();
+    else if (sPrev <= GATE_S && G.s > GATE_S && G.phase === 'flight') gatePassed();
   }
   if (G.phase !== 'takeoff' && G.phase !== 'landed') G.y += G.vY * dt;
 
@@ -811,6 +847,14 @@ function collideBed(dt) {
       G.bedScrapeCd = 0.3; G.bedScrapes++;
       for (let i = 0; i < 4; i++) mist.emit(V1.x, V1.y, V1.z, (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 1.5, 3, 6, 0.32, 0.27, 0.2, 0.45, -0.2, 0.6);
       audio.scrape?.(Math.min(1, 0.4 + G.speed / 40));
+    }
+    // round 26 fix: scraping the bed sloshes a little water out (no hull damage), on its own cooldown
+    G.bedSpillCd = (G.bedSpillCd || 0) - dt;
+    if (G.bedSpillCd <= 0 && G.cargo > 0) {
+      G.bedSpillCd = BED_SPILL_CD;
+      const d = Math.min(G.cargo, BED_SPILL);
+      G.cargo -= d; G.waterSpilled += d; G.waterHitLoss += d; G.bedSpilled = (G.bedSpilled || 0) + d;
+      waterTick(-d); pulseRow(hud.rowCargo);
     }
   }
 }
@@ -921,7 +965,7 @@ function aimTarget(p, widen = 1) {
   const consider = (o, kind) => {
     V3.copy(o.wp).sub(p);
     const d = V3.length();
-    const naval = kind === 'mine' || kind === 'hunter' || kind === 'boat' || (kind === 'core' && uw);
+    const naval = kind === 'mine' || kind === 'hunter' || kind === 'boat';
     if (naval ? (d < 4 || d > (uw ? UW_RANGE + 6 : 50)) : (d < 15 || d > AIM_RANGE)) return;
     let score;
     if (naval) {
@@ -935,13 +979,13 @@ function aimTarget(p, widen = 1) {
       } else {
         const a = Math.acos(clamp(V3.dot(shipFwd) / d, -1, 1));
         // round 12: submerged, a boat's belly weak point gets a strong assist (±25°): bolts converge on it
-        if (a > (uw && (kind === 'boat' || kind === 'core') ? AIM_UW_BOAT : AIM_CONE * 1.3) * widen) return;
+        if (a > (uw && kind === 'boat' ? AIM_UW_BOAT : AIM_CONE * 1.3) * widen) return;
         score = a * 0.4;   // close naval threats take priority over distant rim targets
       }
       if (score >= bestScore || !viewLOS(p, o.wp, G.s)) return;
       bestScore = score; best = o; bestK = kind;
       return;
-    } else if (kind === 'turret') {
+    } else if (kind === 'turret' || kind === 'antenna') {
       const hl = Math.hypot(V3.x, V3.z) || 1;
       const ah = Math.acos(clamp((V3.x * AIM_H.x + V3.z * AIM_H.z) / hl, -1, 1));
       const ev = Math.atan2(V3.y, hl) - fwdEl;
@@ -949,7 +993,7 @@ function aimTarget(p, widen = 1) {
       score = ah * 1.4 + Math.abs(ev) * 0.25;
     } else {
       const a = Math.acos(clamp(V3.dot(shipFwd) / d, -1, 1));
-      if (a > AIM_CONE * (kind === 'core' ? 1.9 : 1) * widen) return;
+      if (a > AIM_CONE * widen) return;
       score = a;
     }
     if (score >= bestScore || mastOnLine(p, o.wp) || !viewLOS(p, o.wp, G.s)) return;
@@ -960,9 +1004,8 @@ function aimTarget(p, widen = 1) {
     for (const m of MINES) if (m.alive && Math.abs(m.s - G.s) < 90) consider(m, 'mine');
     for (const h of HUNTERS) if (h.alive && h.vis && Math.abs(h.ps - G.s) < 90) consider(h, 'hunter');
     for (const b of BOATS) if (b.alive && Math.abs(b.s - G.s) < 90) consider(b, 'boat');
-    if (Math.abs(GATE_S - G.s) < 90) for (const c of GATE.cores) if (c.alive && c.under) consider(c, 'core');
   } else {
-    if (GATE_S - G.s < 260 && GATE_S - G.s > -20) for (const c of GATE.cores) if (c.alive && !c.under) consider(c, 'core');
+    if (GATE_S - G.s < 260 && GATE_S - G.s > 0 && GATE.state === 'armed') for (const c of GATE.ants) if (c.alive) consider(c, 'antenna');
     for (const d of DRONES) if (d.alive && Math.abs(d.s - G.s) < 260) consider(d, 'drone');
     for (const b of BEACONS) if (b.alive && Math.abs(b.s - G.s) < 260) consider(b, 'beacon');
     for (const t of TURRETS) if (t.alive && Math.abs(t.s - G.s) < 260) consider(t, 'turret');
@@ -987,7 +1030,7 @@ function findRocketTarget(from, dir) {
   let best = null, bc = 0;
   for (const d of DRONES) if (d.alive && Math.abs(d.s - G.s) < 400) { const c = rocketTargetOK(d.wp, from, dir, 0.975, 380); if (c > bc) { bc = c; best = d; } }
   for (const t of TURRETS) if (t.alive && Math.abs(t.s - G.s) < 400) { const c = rocketTargetOK(t.wp, from, dir, 0.975, 380); if (c > bc) { bc = c; best = t; } }
-  if (GATE_S - G.s < 400) for (const t of GATE.cores) if (t.alive && !t.under) { const c = rocketTargetOK(t.wp, from, dir, 0.96, 380); if (c > bc) { bc = c; best = t; } }
+  if (GATE_S - G.s < 400 && GATE.state === 'armed') for (const t of GATE.ants) if (t.alive) { const c = rocketTargetOK(t.wp, from, dir, 0.96, 380); if (c > bc) { bc = c; best = t; } }
   return best && viewLOS(from, best.wp, G.s) ? best : null;
 }
 function fireRocket() {
@@ -1042,7 +1085,7 @@ function updateRockets(dt) {
     if (r.target && r.target.alive) {
       V4.copy(r.target.wp).sub(r.p).normalize();
       const ang = Math.acos(clamp(V3.dot(V4), -1, 1));
-      const rate = TURRETS.includes(r.target) || isCore(r.target) ? 2.4 : 1.3;   // turrets sit high on the ledges: steeper climb
+      const rate = TURRETS.includes(r.target) || isAntenna(r.target) ? 2.4 : 1.3;   // turrets sit high on the ledges: steeper climb
       if (ang > 1e-4) V3.lerp(V4, Math.min(1, (rate * dt) / ang)).normalize();
     }
     r.v.copy(V3).multiplyScalar(sp);
@@ -1053,8 +1096,8 @@ function updateRockets(dt) {
     if (!hit) for (const t of TURRETS) if (t.alive && Math.abs(t.s - r.s) < 50 && segSphere(r.q, r.p, t.wp, 3)) { hit = 'turret '; break; }
     if (!hit) for (const b of BEACONS) if (b.alive && Math.abs(b.s - r.s) < 50 && segSphere(r.q, r.p, b.wp, 2.4)) { hit = true; break; }
     if (!hit) for (const m of MASTS) if (m.alive && Math.abs(m.s - r.s) < 50 && m.pts.some((pt) => segSphere(r.q, r.p, pt, 2.1))) { hit = true; break; }
-    if (!hit && Math.abs(GATE_S - r.s) < 60) for (const c of GATE.cores) if (c.alive && !c.under && segSphere(r.q, r.p, c.wp, 3.4)) { hit = 'core '; hitCore(c, 8, r.p); break; }
-    if (!hit && GATE.up && r.age > 0.08 && r.s > GATE_S - 1) { hit = 'world '; curtainHit(r.p, 1); }
+    if (!hit && Math.abs(GATE_S - r.s) < 60 && GATE.state === 'armed') for (const c of GATE.ants) if (c.alive && segSphere(r.q, r.p, c.wp, 3.6)) { hit = 'antenna '; hitAntenna(c, 8, r.p); break; }
+    if (!hit && r.age > 0.08) { const pr = projectToPath(r.p.x, r.p.z, r.s); if (curtainBlocks(pr.s, pr.lat, r.p.y)) { hit = 'world '; curtainHit(r.p, 1); } }
     if (!hit && r.p.y < BOAT_TOP + 0.5) for (const bt of BOATS) if (bt.alive && Math.abs(bt.s - r.s) < 30 && inBoat(bt, r.p, 0.6)) { hit = 'boat '; break; }
     if (!hit && r.age > 0.08) {
       // terrain / water
@@ -1161,9 +1204,8 @@ function updateBolts(dt) {
     let dead = b.life <= 0;
     if (b.under) {
       // underwater: mines, hunters, boat bellies; dies at the surface, the banks and the bed
-      if (!dead && Math.abs(GATE_S - b.s) < 40) for (const c of GATE.cores) if (c.alive && c.under && segSphere(b.q, b.p, c.wp, 2.9)) { hitCore(c, 1, b.p); dead = true; break; }
       if (!dead) { dead = navalBoltHit(b, true); if (dead) G.shotHits++; }
-      if (!dead && GATE.up && b.s > GATE_S - 0.5) { dead = true; curtainHit(b.p, 0.4); }
+      if (!dead && curtainBlocks(b.s, projectToPath(b.p.x, b.p.z, b.s).lat, b.p.y)) { dead = true; curtainHit(b.p, 0.4); }
       if (!dead) dead = uwBoltWorld(b);
     } else {
       if (!dead) {
@@ -1184,8 +1226,8 @@ function updateBolts(dt) {
         if (!t.alive || Math.abs(t.s - b.s) > 40) continue;
         if (segSphere(b.q, b.p, t.wp, 2.6)) { killTarget('turret', t); dead = true; G.shotHits++; break; }
       }
-      if (!dead && Math.abs(GATE_S - b.s) < 60) for (const c of GATE.cores) if (c.alive && !c.under && segSphere(b.q, b.p, c.wp, 2.9)) { hitCore(c, 1, b.p); dead = true; break; }
-      if (!dead && GATE.up && b.s > GATE_S - 0.5) { dead = true; curtainHit(b.p, 0.4); }
+      if (!dead && Math.abs(GATE_S - b.s) < 60 && GATE.state === 'armed') for (const c of GATE.ants) if (c.alive && segSphere(b.q, b.p, c.wp, 3.2)) { hitAntenna(c, 1, b.p); dead = true; break; }
+      if (!dead && curtainBlocks(b.s, projectToPath(b.p.x, b.p.z, b.s).lat, b.p.y)) { dead = true; curtainHit(b.p, 0.4); }
       if (!dead) { dead = navalBoltHit(b, false); if (dead) G.shotHits++; }   // boats: armoured from above (ricochet)
       // entering the water: the bolt carries a few metres down — enough for mines just under the surface
       if (!dead && b.p.y < 0 && b.q.y >= 0) {
@@ -2534,16 +2576,27 @@ function hint(kind) {
 
 // ------------------------------------------------------------------ round 16: mission structure — acts + the LETHE gate finale
 // The route is split into named acts (a title card on entry, escalating rim-turret pressure in act III) and ends at the
-// LETHE gate: a frame across the canyon with a red energy curtain, held up by three generator cores (two in the air,
-// one underwater). The field holds the ship in a hover arena in front of it; all three cores down = gate falls.
+// LETHE gate: a frame across the canyon with a red energy curtain. Round 26: the curtain cannot be destroyed. Three
+// antennas on the beam keep it closed — knock all three down and a breach (a notch from the riverbed up, centred on the
+// river) opens for BREACH_DUR s. Fly through it = delivery. If it closes first, the antennas reboot after
+// ANT_REBOOT s and the attempt starts over (no hard fail). The field holds the ship in a hover arena ~GATE_HOLD m in
+// front of it while the breach is shut; touching the curtain anywhere outside an open breach drains half the tank.
 const gateObj = buildGate(scene, FOG_D_AIR);
-const GATE = { up: true, said: false, hold: false, downT: -1, bumpCd: 0, hitK: 0, cores: [] };
-GATE_CORES.forEach((c, i) => {
-  const m = gateObj.cores[i];
-  GATE.cores.push({ i, s: GATE_S, lat: m.lat, y: m.y, under: m.under, wp: toWorld(GATE_S, m.lat, m.y, new THREE.Vector3()), hp: CORE_HP, alive: true, cd: 1.6 + i * 0.8, gate: true, flash: 0 });
+const BREACH_DUR = 8, ANT_REBOOT = 5, FIELD_DRAIN = 0.5, FIELD_CD = 1.6, FIELD_KNOCK = 40;
+const GATE_GUN_CD = [1.5, 2.3], GATE_GUN_DMG = 7;
+const GATE = { up: true, state: 'armed', breachT: 0, rebootT: 0, open: 0, passed: false, said: false, hold: false, bumpCd: 0, hitK: 0,
+  attempts: 0, ants: [], guns: [] };
+gateObj.antennas.forEach((m, i) => {
+  GATE.ants.push({ i, s: GATE_S, lat: m.lat, y: m.y, wp: toWorld(GATE_S - 0.5, m.lat, m.y, new THREE.Vector3()), hp: ANT_HP, alive: true, gate: true, flash: 0, boot: 0 });
 });
-const isCore = (o) => !!(o && o.gate);
-const CORE_PTS = 600, GATE_PTS = 1500;
+gateObj.guns.forEach((m, i) => {
+  GATE.guns.push({ i, lat: m.lat, y: m.y, wp: toWorld(GATE_S - 1.5, m.lat, m.y, new THREE.Vector3()), cd: 2 + i * 0.9, s: GATE_S });
+});
+const isAntenna = (o) => !!(o && o.gate);
+const ANT_PTS = 400, GATE_PTS = 1500;
+// is (lat, y) inside the breach notch (with a hull margin), and is the breach open?
+const BREACH_M = 3.2;
+const inBreach = (lat, y) => GATE.state === 'open' && GATE.open > 0.85 && Math.abs(lat) < BREACH_HW - BREACH_M && y < BREACH_TOP - 2.5;
 const ACTS = [
   { s: 200, key: 'act.1' },
   { s: 2700, key: 'act.2' },
@@ -2562,10 +2615,14 @@ function showAct(i) {
   audio.actSting?.();
 }
 function resetGate() {
-  GATE.up = true; GATE.said = false; GATE.hold = false; GATE.downT = -1; GATE.bumpCd = 0; GATE.hitK = 0;
-  for (const c of GATE.cores) { c.hp = CORE_HP; c.alive = true; c.cd = 1.6 + c.i * 0.8; c.flash = 0; }
-  for (const m of gateObj.cores) m.g.visible = true;
-  gateObj.curtain.visible = true; gateObj.curtainMat.uniforms.uAlpha.value = 1;
+  GATE.up = true; GATE.state = 'armed'; GATE.breachT = 0; GATE.rebootT = 0; GATE.open = 0; GATE.passed = false;
+  GATE.said = false; GATE.hold = false; GATE.bumpCd = 0; GATE.hitK = 0; GATE.attempts = 0;
+  rebootAntennas(true);
+  for (const g of GATE.guns) g.cd = 2 + g.i * 0.9;
+  gateObj.curtain.visible = true; gateObj.curtainMat.uniforms.uAlpha.value = 1; gateObj.curtainMat.uniforms.uGap.value.w = 0;
+}
+function rebootAntennas(quiet) {
+  for (const a of GATE.ants) { a.hp = ANT_HP; a.alive = true; a.flash = 0; a.boot = quiet ? 0 : 1; gateObj.antennas[a.i].up.visible = true; }
 }
 function curtainHit(p, k) {
   // ripple on the curtain at the impact (curtain local x = lateral, y = height)
@@ -2574,105 +2631,166 @@ function curtainHit(p, k) {
   GATE.hitK = Math.max(GATE.hitK, k);
   sparks.emit(p.x, p.y, p.z, 0, 0, 0, 0.15, 4, 3, 2.4, 0.45, 0.2, 1);
 }
-function hitCore(c, dmg, p) {
-  if (!c.alive) return;
-  c.hp -= dmg; c.flash = 1;
+// does a projectile at path position s / height y hit the curtain (not above it, not through an open breach)?
+function curtainBlocks(s, lat, y) {
+  return GATE.up && s > GATE_S - 0.5 && s < GATE_S + 3 && y < gateObj.curtainTop && !(GATE.state === 'open' && GATE.open > 0.5 && Math.abs(lat) < BREACH_HW && y < BREACH_TOP);
+}
+function hitAntenna(a, dmg, p) {
+  if (!a.alive || GATE.state !== 'armed') return;
+  a.hp -= dmg; a.flash = 1;
   G.shotHits += dmg >= 4 ? 0 : 1;
-  sparkBurst(p || c.wp, 10, c.under ? [0.6, 1.6, 1.6] : [2.4, 0.9, 0.4]);
+  sparkBurst(p || a.wp, 10, [2.4, 1.2, 0.4]);
   audio.hitTick();
   hitMarker();
-  if (c.hp > 0) return;
-  c.alive = false; c.hp = 0;
-  G.coreKills++;
-  G.score += CORE_PTS;
-  gateObj.cores[c.i].g.visible = false;
-  if (c.under) underwaterBlast(c.wp, 1.4); else explode(c.wp, 1.8);
-  lightFlash(c.wp, 400, 0.4, 1, 0.4, 0.2);
-  G.shake = Math.min(1.4, G.shake + 0.6);
-  const left = GATE.cores.filter((x) => x.alive).length;
-  popScore(`+${CORE_PTS} ${tx('lbl.core')}`);
-  if (left > 0) {
-    showMsg(tx('msg.genDown', { n: left }), 2, '#ffb070');
-    const uw = GATE.cores.find((x) => x.alive && x.under);
-    if (uw && left === 1) toast(tx('toast.lastGen'), 5, true);
-  } else gateDown();
+  if (a.hp > 0) return;
+  a.alive = false; a.hp = 0;
+  G.antKills++;
+  G.score += ANT_PTS;
+  gateObj.antennas[a.i].up.visible = false;
+  explode(a.wp, 1.4);
+  lightFlash(a.wp, 400, 0.4, 1, 0.6, 0.2);
+  G.shake = Math.min(1.4, G.shake + 0.5);
+  const left = GATE.ants.filter((x) => x.alive).length;
+  popScore(`+${ANT_PTS} ${tx('lbl.antenna')}`);
+  if (left > 0) showMsg(tx('msg.antDown', { n: left }), 2, '#ffb070');
+  else openBreach();
 }
-function gateDown() {
-  GATE.up = false; GATE.downT = 0; GATE.hold = false;
-  G.gateT = G.t;
-  G.score += GATE_PTS;
-  showMsg(tx('msg.gateDown'), 3, '#9ff2d8');
-  popScore(`+${GATE_PTS} ${tx('lbl.gate')}`);
-  toast(tx('toast.letheNo'), 3.5, true);
+function openBreach() {
+  GATE.state = 'open'; GATE.breachT = BREACH_DUR; GATE.attempts++;
+  showMsg(tx('msg.breachOpen'), 2.6, '#9ff2d8');
+  toast(tx('toast.breach'), 4, true);
   audio.collapse();
+  G.shake = Math.min(1.4, G.shake + 0.4);
+}
+function closeBreach() {
+  GATE.state = 'reboot'; GATE.rebootT = ANT_REBOOT;
+  if (G.phase === 'flight' && !GATE.passed) { showMsg(tx('msg.breachClosed'), 2.8, '#ff8a5a'); toast(tx('toast.letheReboot'), 3.5, true); }
+  audio.shieldUp?.();
+}
+// round 26: flown through the breach — the barrier stays, the water gets through
+function gatePassed() {
+  GATE.passed = true; GATE.hold = false;
+  G.gateT = G.t;
+  if (!G.gatePaid) { G.gatePaid = true; G.score += GATE_PTS; popScore(`+${GATE_PTS} ${tx('lbl.gate')}`); }
+  showMsg(tx('msg.breached'), 3, '#9ff2d8');
+  toast(tx('toast.letheNo'), 3.5, true);
+}
+// touching the curtain outside an open breach: half the tank boils off, strong knock-back + shake (not a crash)
+function fieldTouch() {
+  G.s = Math.min(G.s, GATE_S - 6);
+  G.speed = 0;
+  if (GATE.bumpCd > 0 || G.phase !== 'flight') return;
+  GATE.bumpCd = FIELD_CD;
+  G.knockV = FIELD_KNOCK;
+  G.shake = Math.min(1.6, G.shake + 1.2);
+  G.hitFlash = 1;
+  curtainHit(V1.copy(shipPos).addScaledVector(shipFwd, 4), 1.4);
+  sparkBurst(shipPos, 40, [2.4, 0.5, 0.2]);
+  lightFlash(shipPos, 500, 0.4, 1, 0.3, 0.15);
+  const d = G.cargo * FIELD_DRAIN;
+  if (d > 0.05) { G.cargo -= d; G.waterSpilled += d; G.fieldDrained += d; waterTick(-d); pulseRow(hud.rowCargo); }
+  G.fieldTouches++;
+  showMsg(tx('msg.fieldDrain'), 2.2, '#ff7a5a');
+  audio.shieldDown();
+  audio.hit();
 }
 function updateGate(dt, time) {
   const U = gateObj.curtainMat.uniforms;
   U.uTime.value = time;
   GATE.hitK = Math.max(0, GATE.hitK - dt * 2.5);
+  GATE.bumpCd -= dt;
   U.uHit.value.z = GATE.hitK;
-  if (GATE.downT >= 0) {
-    GATE.downT += dt;
-    U.uAlpha.value = Math.max(0, 1 - GATE.downT / 1.4) * (Math.random() < 0.3 ? 0.3 : 1);
-    if (GATE.downT > 1.4) gateObj.curtain.visible = false;
-    // chain of blasts along the beam
-    const n = Math.floor(GATE.downT / 0.22);
-    if (n > (GATE.booms || 0) && n <= 7) {
-      GATE.booms = n;
-      const lat = (n / 7 * 2 - 1) * gateObj.WL * 0.9;
-      explode(toWorld(GATE_S, lat, GATE_BEAM - 2, V4).clone(), 1.2);
+  // breach state machine: armed (antennas up) -> open (BREACH_DUR) -> reboot (ANT_REBOOT) -> armed
+  if (GATE.state === 'open') {
+    GATE.breachT -= dt;
+    if (GATE.breachT <= 0) { GATE.breachT = 0; closeBreach(); }
+  } else if (GATE.state === 'reboot') {
+    GATE.rebootT -= dt;
+    if (GATE.rebootT <= 0) {
+      GATE.state = 'armed';
+      rebootAntennas(false);
+      if (G.phase === 'flight' && !GATE.passed && GATE_S - G.s < 600) { showMsg(tx('msg.antUp'), 2.2, '#ffb070'); audio.actSting?.(); }
     }
-  } else GATE.booms = 0;
+  }
+  // the notch eases open (~0.5 s) and snaps shut faster, flickering in the last 1.5 s
+  const want = GATE.state === 'open' ? (GATE.breachT < 1.5 && (time * 12) % 1 < 0.25 ? 0.9 : 1) : 0;
+  GATE.open += (want - GATE.open) * damp(want > GATE.open ? 5 : GATE.state === 'open' ? 9 : 16, dt);
+  if (GATE.open < 0.003) GATE.open = 0;
+  U.uGap.value.w = GATE.open;
   if (G.phase === 'flight' || G.phase === 'takeoff') { const a = actAt(G.s); if (a > G.act) { G.act = a; showAct(a); } }
   const near = GATE_S - G.s < 1400 && GATE_S - G.s > -330;
   if (!near) return;
-  // generator glow: a pulsing core sphere + HDR glow sprite (hidden across the water line from the other side)
-  for (const c of GATE.cores) {
-    if (!c.alive) continue;
-    c.flash = Math.max(0, c.flash - dt * 6);
-    const m = gateObj.cores[c.i];
-    const pulse = 1 + 0.08 * Math.sin(time * 6 + c.i * 2) + c.flash * 0.25;
-    m.glow.scale.setScalar(pulse);
-    if (c.under === camUnder) {
-      const dc = c.wp.distanceTo(camera.position), minS = (14 * dc) / pxScale;
-      glows.add(c.wp.x, c.wp.y, c.wp.z, c.under ? 1.2 : 2.4, c.under ? 0.5 : 0.35, 0.15, 0.9 + c.flash, Math.max(9, minS * 2));
+  // antennas: pulsing amber emitter ring + blinking tip; a rebooting antenna flickers back in
+  for (const a of GATE.ants) {
+    const m = gateObj.antennas[a.i];
+    a.flash = Math.max(0, a.flash - dt * 6);
+    a.boot = Math.max(0, a.boot - dt * 0.8);
+    if (!a.alive) {
+      if (Math.random() < dt * 10) mist.emit(a.wp.x, a.wp.y - 8, a.wp.z, (Math.random() - 0.5) * 2, 3 + Math.random() * 2, (Math.random() - 0.5) * 2, 2 + Math.random(), 2, 8, 0.2, 0.17, 0.15, 0.5, -1, 0.6);
+      if (Math.random() < dt * 6) sparks.emit(a.wp.x, a.wp.y - 9, a.wp.z, (Math.random() - 0.5) * 8, 4 + Math.random() * 6, (Math.random() - 0.5) * 8, 0.5, 0.8, 0.2, 2.2, 1.2, 0.4, 1, 22, 1);
+      continue;
+    }
+    const bootOn = a.boot > 0 ? ((time * 14) % 1 < 0.5 ? 1 : 0.15) : 1;
+    m.glowMat.opacity = bootOn * (0.85 + 0.15 * Math.sin(time * 5 + a.i * 2));
+    m.ring.scale.setScalar(1 + a.flash * 0.15);
+    const blink = (time * 1.6 + a.i * 0.33) % 1 < 0.18;
+    m.tip.visible = blink || a.flash > 0.2;
+    if (!camUnder) {
+      const dc = a.wp.distanceTo(camera.position), minS = (14 * dc) / pxScale;
+      glows.add(a.wp.x, a.wp.y, a.wp.z, 2.6, 1.15, 0.3, (0.75 + a.flash) * bootOn, Math.max(8, minS * 2));
+      if (blink) { V4.set(a.wp.x, gateObj.antennas[a.i].tipY, a.wp.z); glows.add(V4.x, V4.y, V4.z, 2.6, 0.5, 0.25, 1, Math.max(6, minS * 1.6)); }
+    }
+  }
+  // the breach notch: hot rim glow sprites along its edges so it reads from far away
+  if (GATE.open > 0.05 && !camUnder) {
+    const hw = BREACH_HW * GATE.open;
+    for (let k = 0; k < 6; k++) {
+      const y = -1 + (BREACH_TOP + 1) * (k / 5);
+      for (const sx of [-1, 1]) { toWorld(GATE_S, sx * hw, y, V4); glows.add(V4.x, V4.y, V4.z, 2.4, 0.6, 0.25, 0.55 + 0.3 * Math.random(), 9); }
+      toWorld(GATE_S, (k / 5 * 2 - 1) * hw, BREACH_TOP, V4); glows.add(V4.x, V4.y, V4.z, 2.4, 0.6, 0.25, 0.55 + 0.3 * Math.random(), 9);
     }
   }
   const lampOn = (time * 2) % 1 < 0.5;
-  gateObj.lamps.visible = GATE.up ? lampOn : false;
+  gateObj.lamps.visible = lampOn;
+  // gun pods track the ship
+  for (const g of GATE.guns) {
+    const m = gateObj.guns[g.i];
+    m.head.updateMatrixWorld();
+    V4.copy(shipPos); m.g.worldToLocal(V4); V4.sub(m.head.position);
+    m.head.rotation.set(-Math.atan2(V4.y, Math.hypot(V4.x, V4.z)), Math.atan2(V4.x, V4.z), 0, 'YXZ');
+  }
   if (G.phase !== 'flight') return;
   const dist = GATE_S - G.s;
-  if (GATE.up && !GATE.said && dist < 640) {
+  if (!GATE.passed && !GATE.said && dist < 640) {
     GATE.said = true;
     showMsg(tx('msg.gate'), 3, '#ff8a5a');
-    toast(tx('toast.gate'), 6, true);
+    toast(tx('toast.gate'), 7, true);
   }
-  if (!GATE.up || dist > 480 || dist < -20) return;
-  // generator fire: air cores shoot red bolts while the ship is above water, the underwater core shoots cyan ones below;
-  // the fewer cores are left, the faster the rest fire (escalation inside the fight)
-  const left = GATE.cores.filter((x) => x.alive).length;
-  for (const c of GATE.cores) {
-    if (!c.alive) continue;
-    const can = c.under ? G.underwater && c.wp.distanceTo(shipPos) < 115 : !G.underwater;
-    if (!can) continue;
-    c.cd -= dt;
-    if (c.cd > 0) continue;
-    c.cd = 1.0 + 0.55 * left + Math.random() * 0.6;
-    if (!c.under && !lineOfSight(shipPos, c.wp, G.s)) continue;
-    const sp = EB_SPEED * (c.under ? 0.55 : 0.85);
-    V3.copy(shipPos).sub(c.wp).normalize().multiplyScalar(3.4).add(c.wp);
-    const b = enemyBolt(V3, leadTarget(V3, V4, sp, c.under), GATE_S, sp, c.under ? EB_CYAN : EB_RED, 7, 3.4, 'gate', c.under, 4);
+  if (GATE.passed || dist > 480 || dist < -20) return;
+  // gate guns: red bolts while the ship is above water and in sight (the river hides you)
+  for (const g of GATE.guns) {
+    if (G.underwater) continue;
+    g.cd -= dt;
+    if (g.cd > 0) continue;
+    g.cd = GATE_GUN_CD[0] + Math.random() * (GATE_GUN_CD[1] - GATE_GUN_CD[0]) - (GATE.state === 'open' ? 0.4 : 0);
+    if (!lineOfSight(shipPos, g.wp, G.s)) continue;
+    const sp = EB_SPEED * 0.85;
+    V3.copy(shipPos).sub(g.wp).normalize().multiplyScalar(3.4).add(g.wp);
+    const b = enemyBolt(V3, leadTarget(V3, V4, sp, false), GATE_S, sp, EB_RED, GATE_GUN_DMG, 3.4, 'gate', false, 4);
     if (!b) continue;
-    threat(c, c.wp);
-    sparks.emit(V3.x, V3.y, V3.z, 0, 0, 0, 0.12, 6, 3, c.under ? 0.4 : 2.4, c.under ? 1.6 : 0.4, c.under ? 1.7 : 0.2, 1);
-    audio.turretShot(panOf(c.wp) * 0.8);
+    G.gateShots++;
+    threat(g, g.wp);
+    sparks.emit(V3.x, V3.y, V3.z, 0, 0, 0, 0.12, 6, 3, 2.4, 0.4, 0.2, 1);
+    audio.turretShot(panOf(g.wp) * 0.8);
   }
 }
 
 // ------------------------------------------------------------------ round 18: checkpoints + respawn
-// Passing a checkpoint stores cargo / health / shield / rockets. On a crash the ship respawns there after ~2 s with at
-// least 40 % cargo and 60 % health, full air and ~3 s of protection. Everything already destroyed stays destroyed
-// (incl. gate generators); crashes are counted on the result screen. ?cp=0 restores the old "crash ends the run".
+// Passing a checkpoint stores water / health / shield / rockets. On a crash the ship respawns there after ~2 s with
+// at least 60 % health, full air and ~3 s of protection. Round 26: the tank gets back exactly the water it held at the
+// checkpoint (no 40 % floor any more — the tank starts empty and the river is right there; water collected after the
+// checkpoint is lost with the crash). Everything already destroyed stays destroyed; the gate antennas reboot.
+// Crashes are counted on the result screen. ?cp=0 restores the old "crash ends the run".
 const cpTicks = CHECKPOINTS.map((c, i) => (i ? routeTick(c, 'cp', tx('lbl.checkpoint', { i })) : null));
 const CP_N = CHECKPOINTS.length - 1;
 function cpSnapshot() { return { cargo: G.cargo, health: G.health, shield: G.shield, rockets: G.rockets }; }
@@ -2707,13 +2825,13 @@ function updateCheckpoints(dt, time) {
   }
 }
 function respawn() {
-  const i = Math.max(0, G.cp), c = CHECKPOINTS[i], snap = G.cpSnap || { cargo: 100, health: 100, shield: SHIELD_MAX, rockets: ROCKET_AMMO };
+  const i = Math.max(0, G.cp), c = CHECKPOINTS[i], snap = G.cpSnap || { cargo: 0, health: 100, shield: SHIELD_MAX, rockets: ROCKET_AMMO };
   endTutorial(); endIntro();
   G.phase = 'flight'; G.phaseT = 0; G.outcome = null; G.reason = ''; G.reasonKey = null; G.respawn = false;
   G.s = c; G.lat = 0; G.y = 12; G.vY = 0; G.vLat = 0; G.speed = 45; G.boost = 0;
   G.dive = false; G.underwater = false; G.wasUnder = false; G.air = 60; G.airOut = false; G.dip = 0; G.apDiveT = 0;
   G.yaw = 0; G.pitch = 0; G.roll = 0; G.hitCd = 0; G.rad = 0; G.bedHits = 0; G.bedScrapes = 0;
-  G.cargo = Math.max(snap.cargo, 40); G.health = Math.max(snap.health, 60); G.shield = Math.max(snap.shield, SHIELD_MAX * 0.5); G.rockets = Math.max(snap.rockets, 2);
+  G.cargo = snap.cargo; G.diveGain = 0; G.surfT = 9; G.knockV = 0; G.health = Math.max(snap.health, 60); G.shield = Math.max(snap.shield, SHIELD_MAX * 0.5); G.rockets = Math.max(snap.rockets, 2);
   disp.cargo = disp.gc = G.cargo;
   G.invuln = 3;
   G.mark = 0; G.lock = { phase: 'none', t: 0, turret: null, shots: 0 };
@@ -2728,6 +2846,9 @@ function respawn() {
   camInit = false;
   showMsg(i ? tx('msg.cpRespawn', { i }) : tx('msg.startRespawn'), 2, '#9ff2d8');
   if (i) cpTicks[i]?.classList.add('on');
+  // round 26: every checkpoint lies before the gate, so a respawn restores the gate as it was there: antennas up,
+  // notch shut, not passed (also after a crash past the breach), cooldowns cleared. The gate bonus is only paid once.
+  if (c < GATE_S) { resetGate(); G.gateT = null; G.retreatV = 0; }
 }
 
 // ------------------------------------------------------------------ round 19: music intensity 0..1
@@ -2747,7 +2868,7 @@ function musicIntensity() {
   for (const h of HUNTERS) if (h.alive && h.mode === 'hunt') { I = Math.max(I, 0.66); break; }
   if (thrShown > 0) I = Math.max(I, 0.6);
   if (G.hurtT != null && G.t - G.hurtT < 2.5) I = Math.max(I, 0.75);
-  if (GATE.up) { const d = GATE_S - G.s; if (d < 700 && d > -20) I = Math.max(I, d < 320 ? 1 : 0.85); }
+  if (GATE.up && !GATE.passed) { const d = GATE_S - G.s; if (d < 700 && d > -20) I = Math.max(I, d < 320 ? 1 : 0.85); }
   return Math.min(1, I);
 }
 
@@ -2966,7 +3087,55 @@ function updateHazards(dt) {
     G.shake = Math.min(1, G.shake + 0.35);
   }
   G.wasUnder = G.underwater;
+  updateTank(dt);
   updateBurn(dt);
+}
+
+// round 26: the tank fills only while the hull is submerged (the hydrojet intake doubles as the water scoop).
+// FILL_RATE %/s into an empty tank, slowing linearly to (1 - FILL_SLOW) of that when full. One dive takes at most
+// DIVE_CAP % — the intake filter clogs; staying on the surface ≥ SURF_RESET s flushes it for the next dive.
+const FILL_RATE = 3.0, FILL_SLOW = 0.5, DIVE_CAP = 35, SURF_RESET = 4;
+function waterTick(d) {
+  const el = hud.tankTick;
+  if (!el) return;
+  // merge with a tick of the same sign that is still on screen
+  if (G.tickT > 0 && Math.sign(G.tickV || 0) === Math.sign(d)) G.tickV += d; else G.tickV = d;
+  G.tickT = 1.1;
+  const v = Math.abs(G.tickV);
+  el.textContent = (G.tickV > 0 ? '+' : '\u2212') + (v < 9.95 ? v.toFixed(1) : Math.round(v)) + '%';
+  el.className = G.tickV > 0 ? 'up' : 'dn';
+  void el.offsetWidth; el.classList.add('on');
+}
+function updateTank(dt) {
+  const fl = G.phase === 'flight';
+  if (G.underwater) G.surfT = 0;
+  else { G.surfT += dt; if (G.surfT > SURF_RESET) G.diveGain = 0; }
+  const scoop = fl && G.underwater;
+  const rate = scoop && G.cargo < 100 ? FILL_RATE * (1 - FILL_SLOW * G.cargo / 100) : 0;
+  const d = Math.max(0, Math.min(rate * dt, 100 - G.cargo, DIVE_CAP - G.diveGain));
+  G.filling = d > 0;
+  G.fillRate = G.filling ? rate : 0;
+  G.intakeFull = scoop && !G.filling && G.cargo < 99.9;
+  if (G.filling) {
+    G.cargo = Math.min(100, G.cargo + d); G.diveGain += d; G.waterGained += d; G.tickAcc += d;
+    G.gurgleT -= dt;
+    if (G.gurgleT <= 0) { audio.gurgle?.(G.cargo / 100); G.gurgleT = 0.1 + Math.random() * 0.17; }
+    if (!G.fillHinted) { G.fillHinted = true; toast(tx('toast.fillFirst'), 5, true); }
+  }
+  G.fillTickT -= dt;
+  if (G.tickAcc > 0 && (G.fillTickT <= 0 || !G.filling)) {
+    if (G.tickAcc >= 0.5 || !G.filling) waterTick(G.tickAcc);
+    G.tickAcc = 0; G.fillTickT = 0.8;
+  }
+  if (G.tickT > 0) { G.tickT -= dt; if (G.tickT <= 0) hud.tankTick?.classList.remove('on'); }
+  if (G.intakeFull && !G.intakeSaid) { G.intakeSaid = true; showMsg(tx('msg.intakeFull'), 2.2, '#8fe9dc'); }
+  if (!G.underwater) G.intakeSaid = false;
+  if (G.cargo >= 99.95 && !G.fullSaid) {
+    G.cargo = 100; G.fullSaid = true;
+    showMsg(tx('msg.tankFull'), 2.4, '#8fe9dc');
+    audio.tankFull?.();
+  }
+  if (G.cargo < 95) G.fullSaid = false;
 }
 
 // round 6: engines burn cargo water as backup reaction mass (boost, thin air); hydrojet underwater burns none
@@ -3314,9 +3483,9 @@ function viewLOS(a, b, s0) {
 }
 const TGT_N = 10, TGT_RANGE = 260, TGT_RANGE_UW = 95;
 const TGT_KEY = { turret: 'lbl.turret', drone: 'lbl.drone', beacon: 'lbl.relay', mine: 'lbl.mine', hunter: 'lbl.hunter',
-  boat: 'lbl.boat', weak: 'lbl.weak', core: 'lbl.core' };
+  boat: 'lbl.boat', weak: 'lbl.weak', antenna: 'lbl.antenna' };
 const tgtLabel = (k) => (k === 'boat' ? `${tx('lbl.boat')} · ${tx('lbl.armored')}` : tx(TGT_KEY[k]));
-const TGT_R = { turret: 2.6, drone: 2.4, beacon: 2.2, mine: 1.8, hunter: 1.6, boat: 5, weak: 2.2, core: 3 };
+const TGT_R = { turret: 2.6, drone: 2.4, beacon: 2.2, mine: 1.8, hunter: 1.6, boat: 5, weak: 2.2, antenna: 3 };
 const tgtEls = [], mtagEls = [];
 for (let i = 0; i < TGT_N; i++) {
   const el = document.createElement('div'); el.className = 'tgt'; el.innerHTML = '<span></span><b class="hpb"><i></i></b>';
@@ -3334,7 +3503,7 @@ function updateMarkers(rdt) {
     const cp = camera.position;
     const range = camUnder ? TGT_RANGE_UW : TGT_RANGE;
     const add = (o, kind, p = o.wp, s = o.s) => {
-      const reach = kind === 'boat' ? 400 : kind === 'core' ? 330 : kind === 'weak' ? TORP_RANGE + 10 : range;   // round 12: boats stay bracketed through the murk out to torpedo range
+      const reach = kind === 'boat' ? 400 : kind === 'antenna' ? 330 : kind === 'weak' ? TORP_RANGE + 10 : range;   // round 12: boats stay bracketed through the murk out to torpedo range
       if (Math.abs(s - G.s) > reach + 30) return;
       const d = p.distanceTo(shipPos);
       if (d > reach || p.distanceTo(cp) < 8) return;
@@ -3345,9 +3514,8 @@ function updateMarkers(rdt) {
       for (const m of MINES) if (m.alive) add(m, 'mine');
       for (const h of HUNTERS) if (h.alive && h.vis) add(h, 'hunter', h.wp, h.ps);
       for (const b of BOATS) if (b.alive) add(b, 'weak');
-      for (const c of GATE.cores) if (c.alive && c.under) add(c, 'core');
     } else {
-      for (const c of GATE.cores) if (c.alive && !c.under) add(c, 'core');
+      if (GATE.state === 'armed' && !GATE.passed) for (const c of GATE.ants) if (c.alive) add(c, 'antenna');
       for (const d of DRONES) if (d.alive && !d.spotting) add(d, 'drone');   // spotting drones carry the red LETHE bracket
       for (const b of BEACONS) if (b.alive) add(b, 'beacon');
       for (const t of TURRETS) if (t.alive) add(t, 'turret');
@@ -3381,16 +3549,16 @@ function updateMarkers(rdt) {
         }
       }
       const label = c.kind === 'boat' ? `${tx('lbl.boat')} · ${Math.round(c.d)} ${tx('unit.m')}${seen && seen.o === c.o && seen.t > 0 ? ' · ' + tx('lbl.armored') : ''}`
-        : torp ? `${tx('lbl.torpLock')} · ${Math.round(c.d)} ${tx('unit.m')}` : c.kind === 'weak' || c.kind === 'core' || (seen && seen.o === c.o && seen.t > 0) ? tgtLabel(c.kind) : '';
+        : torp ? `${tx('lbl.torpLock')} · ${Math.round(c.d)} ${tx('unit.m')}` : c.kind === 'weak' || (c.kind === 'antenna' && c.o === aimObj) || (seen && seen.o === c.o && seen.t > 0) ? tgtLabel(c.kind) : '';
       if (label !== m.label) { m.label = label; m.span.textContent = label; }
       const aim = c.o === aimObj;
       if (aim !== m.aim) { m.aim = aim; m.el.classList.toggle('aim', aim); }
       if (torp !== m.torp) { m.torp = torp; m.el.classList.toggle('torp', torp); }
       // round 12: boat hull HP (a patrol boat shows the half a torpedo takes)
-      const hpV = c.kind === 'core' ? c.o.hp / CORE_HP : c.kind === 'weak' || c.kind === 'boat' ? c.o.hp / BOAT_HP : -1;
+      const hpV = c.kind === 'antenna' ? c.o.hp / ANT_HP : c.kind === 'weak' || c.kind === 'boat' ? c.o.hp / BOAT_HP : -1;
       if (hpV !== m.hpV) { m.hpV = hpV; m.el.classList.toggle('hp', hpV >= 0); if (hpV >= 0) m.hp.style.transform = `scaleX(${hpV})`; }
       if (c.kind !== m.kind) {
-        m.el.classList.toggle('weak', c.kind === 'weak' || c.kind === 'core');
+        m.el.classList.toggle('weak', c.kind === 'weak' || c.kind === 'antenna');
         m.el.classList.toggle('uwk', c.kind === 'mine' || c.kind === 'hunter');
         m.el.classList.toggle('boat', c.kind === 'boat');
         m.kind = c.kind;
@@ -3428,7 +3596,7 @@ function updateMarkers(rdt) {
 
 // ------------------------------------------------------------------ HUD
 const reticleV = new THREE.Vector3();
-const disp = { cargo: 100, shield: 100, health: 100, gc: 100, gs: 100, gh: 100 };
+const disp = { cargo: 0, shield: 100, health: 100, gc: 0, gs: 100, gh: 100 };
 function setBar(b, v, ghost) {
   b.v.style.transform = `scaleX(${clamp(v, 0, 1)})`;
   if (b.g && ghost !== undefined) b.g.style.transform = `scaleX(${clamp(ghost, 0, 1)})`;
@@ -3446,12 +3614,30 @@ function updateHUD(dt, time) {
   setBar(hud.bAir, G.air / 60);
   setBar(hud.bMark, G.mark);
   hud.rowShield.classList.toggle('regen', G.regen);
-  // round 6: water-burn tag under the cargo gauge (steam-white, not an alarm) + shimmer on the bar
-  const burning = G.burnRate > 0, thinTag = burning && G.thinAir;
-  if (burning !== hud.rowCargo.classList.contains('burn')) hud.rowCargo.classList.toggle('burn', burning);
-  if (burning && thinTag !== hud.burnTag.classList.contains('thin')) {
-    hud.burnTag.classList.toggle('thin', thinTag);
-    hud.burnTag.textContent = tx(thinTag ? 'hud.thinBurn' : 'hud.burn');
+  // round 6: water-burn tag under the tank gauge (steam-white, not an alarm) + shimmer on the bar.
+  // round 26: the same slot shows FILLING (cyan, rising shimmer) while the scoop takes water, INTAKE FULL when a dive's
+  // share is in. Burn and fill never overlap (no burn underwater).
+  const burning = G.burnRate > 0;
+  const tagMode = burning ? (G.thinAir ? 'thin' : 'burn') : G.filling ? 'fill' : G.intakeFull ? 'intake' : '';
+  if (tagMode !== hud.tagMode) {
+    hud.tagMode = tagMode;
+    hud.rowCargo.classList.toggle('burn', burning);
+    hud.rowCargo.classList.toggle('fill', tagMode === 'fill' || tagMode === 'intake');
+    hud.burnTag.classList.toggle('thin', tagMode === 'thin');
+    hud.burnTag.classList.toggle('intake', tagMode === 'intake');
+    if (tagMode) hud.burnTag.textContent = tx({ thin: 'hud.thinBurn', burn: 'hud.burn', fill: 'hud.filling', intake: 'hud.intakeFull' }[tagMode]);
+  }
+  // round 26: breach countdown (big, centre-top) while the notch is open; "rebooting" while the antennas come back
+  if (hud.breach) {
+    const bm = G.phase === 'flight' && !GATE.passed && GATE_S - G.s < 700 ? (GATE.state === 'open' ? 'open' : GATE.state === 'reboot' ? 'reboot' : '') : '';
+    if (bm !== hud.breachMode) { hud.breachMode = bm; hud.breach.className = bm; hud.breachV = null; }
+    const v = bm === 'open' ? GATE.breachT.toFixed(1) : bm === 'reboot' ? Math.ceil(GATE.rebootT) : null;
+    if (bm && v !== hud.breachV) {
+      hud.breachV = v;
+      hud.breach.innerHTML = bm === 'open' ? `<i>${tx('hud.breach')}</i><b>${v}<small>${tx('unit.s')}</small></b>`
+        : `<i>${tx('hud.reboot', { s: v })}</i>`;
+      hud.breach.classList.toggle('hot', bm === 'open' && GATE.breachT < 3);
+    }
   }
   hud.rowShield.classList.toggle('down', G.shield <= 0);
   const locked = G.lock.phase === 'laser' || G.lock.phase === 'volley';
@@ -3509,7 +3695,7 @@ function updateHUD(dt, time) {
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.1;
-  hud.cargo.textContent = G.burnRate > 0 ? G.cargo.toFixed(1) + '%' : Math.ceil(G.cargo) + '%';
+  hud.cargo.textContent = G.burnRate > 0 || G.filling ? G.cargo.toFixed(1) + '%' : Math.round(G.cargo) + '%';
   hud.shield.textContent = G.shield > 0 ? Math.ceil(G.shield) + '%' : tx('hud.down');
   hud.health.textContent = Math.ceil(Math.max(0, G.health)) + '%';
   hud.rad.textContent = G.rad > 0.05 ? (G.rad * 4.2).toFixed(1) + ' ' + tx('unit.svh') : tx('hud.shielded');
@@ -3527,33 +3713,39 @@ const set = (id, v) => { const e = $(id); if (e) e.textContent = v; };   // null
 const litres = (pct) => Math.round(pct / 100 * TANK_L / 10) * 10;
 const fmtL = (l) => String(l).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009') + '\u00a0' + tx('unit.l');
 // round 25: the language-dependent part of the result screen (re-run on a language switch)
+// round 26: WATER DELIVERED is the headline. Landing with less than DELIVER_MIN % is a failed delivery ('short').
+const DELIVER_MIN = 10, WATER_PTS = 40;   // score: +40 per delivered % (4 000 for a full tank)
 function resultText() {
-  const ok = G.outcome === 'delivered';
-  set('rTitle', tx(ok ? 'res.ok' : 'res.fail'));
+  const ok = G.outcome === 'delivered', short = G.outcome === 'short';
+  set('rTitle', tx(ok ? 'res.ok' : short ? 'res.short' : 'res.fail'));
   const rt = $('rTitle'); if (rt) { rt.className = ok ? '' : 'bad'; delete rt.dataset.i18n; }
-  set('rSub', ok ? tx('res.okSub') : (G.reasonKey ? tx(G.reasonKey) : G.reason));
-  const deliv = ok ? G.cargo : 0;
-  set('rGate', G.gateT != null ? tx('st.gateBroken') : `${G.coreKills} / ${GATE.cores.length}`);
-  set('rWater', `${fmtL(litres(deliv))} (${Math.round(deliv)}%)`);
-  set('rBurned', `${fmtL(litres(G.waterBurned))} (${G.waterBurned.toFixed(1)}%)`);
+  set('rSub', ok ? tx('res.okSub') : short ? tx('res.shortSub') : (G.reasonKey ? tx(G.reasonKey) : G.reason));
+  const deliv = ok || short ? G.cargo : 0;
+  set('rGate', G.gateT != null ? tx('st.gateBreached') : `${GATE.ants.filter((a) => !a.alive).length} / ${GATE.ants.length}`);
+  set('rWater', `${fmtL(litres(deliv))} · ${Math.round(deliv)}%`);
+  set('rCollected', `${fmtL(litres(G.waterGained))}`);
+  set('rSpilled', `${fmtL(litres(G.waterSpilled))}`);
+  set('rBurned', `${fmtL(litres(G.waterBurned))}`);
+  $('rWaterRow')?.classList.toggle('bad', !ok);
 }
 function showResult() {
   G.phase = 'result';
+  if (G.outcome === 'delivered' && G.cargo < DELIVER_MIN) G.outcome = 'short';
   const ok = G.outcome === 'delivered';
   const timeBonus = ok ? Math.max(0, Math.round((200 - G.t) * 15)) : 0;
-  G.finalScore = Math.max(0, G.score + (ok ? Math.round(G.cargo) * 20 + Math.round(G.health) * 10 + timeBonus : 0));
+  G.waterBonus = ok ? Math.round(G.cargo * WATER_PTS) : 0;
+  G.finalScore = Math.max(0, G.score + (ok ? G.waterBonus + Math.round(G.health) * 10 + timeBonus : 0));
   resultText();
   const mm = Math.floor(G.t / 60), ss = (G.t % 60).toFixed(1).padStart(4, '0');
   set('rTime', `${mm}:${ss}`);
   const deliv = ok ? G.cargo : 0;
   // round 16 headline stats
-  G.killsTotal = G.kills + G.mineKills + G.hunterKills + G.boatKills + G.coreKills;
+  G.killsTotal = G.kills + G.mineKills + G.hunterKills + G.boatKills + G.antKills;
   set('rKills', `${G.killsTotal}`);
   set('rBoatsSunk', `${G.boatKills} / ${N_BOAT_REAL}`);
   G.accuracy = G.shots ? Math.min(100, Math.round(G.shotHits / G.shots * 100)) : 0;
   set('rAcc', G.shots ? `${G.accuracy}% (${G.shotHits}/${G.shots})` : '—');
   set('rDeaths', `${G.deaths}`);
-  set('rCargo', Math.round(G.cargo) + '%');
   set('rHealth', Math.round(Math.max(0, G.health)) + '%');
   set('rTargets', `${G.kills} / ${N_DRONE_REAL + BEACONS.length + TURRETS.length}`);
   set('rMasts', `${G.mastsBroken}`);
@@ -3562,7 +3754,7 @@ function showResult() {
   set('rHunters', `${G.hunterKills} / ${N_HUNTER_REAL}`);
   set('rBoats', `${G.boatKills} / ${N_BOAT_REAL}`);
   set('rHits', `${G.turretHits} / ${G.turretShotsFired}`);
-  set('rScore', G.finalScore + (ok ? ` (+${timeBonus})` : ''));
+  set('rScore', G.finalScore + (ok ? ` (+${G.waterBonus + timeBonus})` : ''));
   $('result')?.classList.remove('hide');
   document.body.classList.remove('playing');
   input.active = false;
@@ -3583,6 +3775,7 @@ function reset() {
   for (let i = N_BOAT_REAL; i < BOATS.length; i++) BOATS[i].alive = false;
   threats.clear();
   G = freshState();
+  disp.cargo = disp.gc = 0;
   for (const b of bolts) b.on = false;
   for (const b of ebolts) b.on = false;
   for (const r of rockets) r.on = false;
@@ -3747,7 +3940,7 @@ onLang((code) => {
   for (const el of armorEls) el.textContent = tx('lbl.armored');
   for (const m of tgtEls) m.label = null;   // marker tags re-render next frame
   hud.markLbl.textContent = tx(hud.markBox.classList.contains('norelay') ? 'hud.noRelay' : 'hud.mark');
-  hud.burnTag.textContent = tx(hud.burnTag.classList.contains('thin') ? 'hud.thinBurn' : 'hud.burn');
+  hud.tagMode = null; hud.breachMode = null;   // round 26: tank tag + breach cue re-render next frame
   hud.dampPhase = null;
   if (G.phase === 'result') resultText();
 });
@@ -4029,7 +4222,7 @@ function loop(now) {
     for (const m of MASTS) if (m.alive && m.s - G.s > 0 && m.s - G.s < 300) autoFire = false;
     // underwater: shoot whatever the assist locks (mines, hunters, boat bellies)
     if (G.underwater && aimObj) autoFire = true;
-    if (isCore(aimObj)) autoFire = true;
+    if (isAntenna(aimObj)) autoFire = true;
     input.fire = autoFire;
   }
   updateTorpedoLock(realDt);
@@ -4131,10 +4324,11 @@ window.__lethe = {
     burnTag: hud.rowCargo.classList.contains('burn'), mastsBroken: G.mastsBroken, kills: G.kills,
     rockets: G.rockets, rocketsFired: G.rocketsFired, recoilDip: +G.dip.toFixed(3), muted: audio.muted, volume: audio.vol, engineSound: audio.engine,
     aim: aimObj ? (TURRETS.includes(aimObj) ? 'turret' : DRONES.includes(aimObj) ? 'drone' : MINES.includes(aimObj) ? 'mine' : HUNTERS.includes(aimObj) ? 'hunter'
-      : BOATS.includes(aimObj) ? 'boat' : isCore(aimObj) ? 'core' : 'relay') : null, turretKills: G.turretKills,
+      : BOATS.includes(aimObj) ? 'boat' : isAntenna(aimObj) ? 'antenna' : 'relay') : null, turretKills: G.turretKills,
     music: { on: audio.musicOn, intensity: +(audio.mI || 0).toFixed(3), target: +musicIntensity().toFixed(3), step: audio.mStep || 0, ...audio.musicInfo() },
     checkpoint: { cp: G.cp, n: CP_N, deaths: G.deaths, invuln: +G.invuln.toFixed(2), on: CP_ON, list: CHECKPOINTS },
-    gate: { up: GATE.up, hold: GATE.hold, s: GATE_S, cores: GATE.cores.map((c) => (c.alive ? c.hp : 0)), coreKills: G.coreKills }, act: G.act,
+    gate: { up: GATE.up, state: GATE.state, breachT: +GATE.breachT.toFixed(2), rebootT: +GATE.rebootT.toFixed(2), open: +GATE.open.toFixed(2), passed: GATE.passed,
+      hold: GATE.hold, s: GATE_S, ants: GATE.ants.map((c) => (c.alive ? c.hp : 0)), antKills: G.antKills, attempts: GATE.attempts, shots: G.gateShots }, act: G.act,
     mission: { shots: G.shots, shotHits: G.shotHits, deaths: G.deaths, killsTotal: G.killsTotal ?? null, accuracy: G.accuracy ?? null },
     relaysAlive: BEACONS.filter((b) => b.alive).length, relaysDown: BEACONS.filter((b) => !b.alive).length, relayKills: G.relayKills,
     noRelay: G.noRelay, zone: zoneAt(G.s)?.idx ?? -1, sectorLinked: zoneLinked(zoneAt(G.s)), lockRelay: G.lock.phase !== 'none' ? !!G.lock.relay : null,
@@ -4195,13 +4389,23 @@ window.__lethe = {
       });
       return out.sort((a, b) => b[1] - a[1]);
     },
-    hitCore: (i, d = 99) => hitCore(GATE.cores[i], d),
+    hitAntenna: (i, d = 99) => hitAntenna(GATE.ants[i], d),
+    openBreach: () => { for (const a of GATE.ants) hitAntenna(a, 99); return GATE.state; },
     kill: () => fail('fail.debug'),
     // round 25: jump straight to the result screen (stats layout / i18n checks); ok=false shows the failure variant
-    showResult: (ok = true) => { G.outcome = ok ? 'delivered' : 'failed'; if (!ok) { G.reasonKey = 'fail.cargo'; G.reason = tx('fail.cargo'); } showResult(); return G.phase; },
+    // ok = true | false | 'short' (failed delivery: lands with < DELIVER_MIN %)
+    showResult: (ok = true) => { G.outcome = ok === 'short' ? 'delivered' : ok ? 'delivered' : 'failed'; if (ok === 'short') G.cargo = Math.min(G.cargo, 6); else if (ok && G.cargo < DELIVER_MIN) G.cargo = 72; if (!ok) { G.reasonKey = 'fail.hull'; G.reason = tx('fail.hull'); } showResult(); return G.phase; },
+    // round 26 water / gate hooks
+    tank: () => ({ cargo: +G.cargo.toFixed(2), filling: G.filling, fillRate: +(G.fillRate || 0).toFixed(2), diveGain: +G.diveGain.toFixed(2), intakeFull: G.intakeFull,
+      gained: +G.waterGained.toFixed(2), spilled: +G.waterSpilled.toFixed(2), hitLoss: +G.waterHitLoss.toFixed(2), fieldDrained: +G.fieldDrained.toFixed(2), burned: +G.waterBurned.toFixed(2),
+      fieldTouches: G.fieldTouches, bedScrapes: G.bedScrapes, bedSpilled: +(G.bedSpilled || 0).toFixed(2), health: +G.health.toFixed(1), shield: +G.shield.toFixed(1) }),
+    hit: (n = 10) => damage(n, null, 'debug'),
+    toast: (key, dur = 6) => toast(tx(key), dur, true),   // re-show a hint (screenshots: toasts run on real time)
+    breach: () => ({ state: GATE.state, breachT: GATE.breachT, rebootT: GATE.rebootT, open: GATE.open, passed: GATE.passed, hold: GATE.hold }),
     gateWarp: (back = 300) => { G.s = GATE_S - back; G.y = 14; G.lat = 0; G.speed = 60; },
     breakMast: (i) => breakMast(MASTS[i]),
-    setCargo: (v) => { G.cargo = clamp(v, 0, 100); disp.cargo = disp.gc = G.cargo; },
+    // asSpill: book the drop as spilled water (keeps the result screen's collected / spilled / delivered consistent)
+    setCargo: (v, asSpill = false) => { v = clamp(v, 0, 100); if (asSpill && v < G.cargo) { G.waterSpilled += G.cargo - v; G.waterHitLoss += G.cargo - v; } G.cargo = v; disp.cargo = disp.gc = G.cargo; },
     zones: () => ZONES.map((z) => ({ i: z.idx, s0: +z.s0.toFixed(0), s1: +z.s1.toFixed(0), shielded: z.shielded, mast: MASTS.findIndex((m) => m.zone === z) })),
     masts: () => MASTS.map((m) => ({ s: m.s, alive: m.alive })),
     spawnDrone: (ahead = 110, lat = 0, y = 18) => {
@@ -4343,6 +4547,7 @@ window.__lethe = {
     },
     shipCam: () => ({ ship: shipPos.toArray(), cam: camera.position.toArray() }),
     refill: () => { G.air = 60; G.airOut = false; G.cargo = 100; G.health = 100; G.shield = SHIELD_MAX; disp.cargo = disp.gc = 100; },
+    hullFloor: (s, lat) => +hullFloor(s, lat).toFixed(2),   // round 26: lowest allowed ship y over the bed
     // round 23: hull / camera clearance to the riverbed (m; negative = inside rock)
     bedProbe: () => {
       const pr = projectToPath(camera.position.x, camera.position.z, G.s - 20);

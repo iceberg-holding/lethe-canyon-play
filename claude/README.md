@@ -1,7 +1,8 @@
 # LETHE / ЛЕТА — "Delivery" (prototype, variant `claude`, round 11)
 
 Cinematic canyon run on Mars. Fly the amphibious **Cormorant** (БАКЛАН) from settlement **A** to settlement **B**
-(7.99 km of canyon, ≈ 2:36 at cruise speed) with a tank of fresh water. Plain static three.js site (r170, vendored), no build step, no CDN.
+(7.99 km of canyon, ≈ 2:36 at cruise speed). Since round 26 the tank starts **empty**: fill it from the river by diving,
+keep it through the fights, and slip through a breach in the LETHE barrier to deliver it. Plain static three.js site (r170, vendored), no build step, no CDN.
 
 Open `index.html` over HTTP (e.g. `python3 -m http.server`).
 URL params: `?autostart=1` skip the start screen · `?autopilot=1` crude self-flying smoke test ·
@@ -603,15 +604,16 @@ pilots dive when a missile is already locked. Round 1 drones were just score tar
 - A one-line hint is on the start screen and a toast appears on the first drone encounter.
 
 ## Rules (unchanged mechanics)
-- **Cargo / ГРУЗ**: wall, rock-column and arch hits bounce/slow the ship; damage goes to the shield first, then the tank.
-  0 % = mission failed.
+- **Tank / ЦИСТЕРНА** (round 26): starts empty, fills only underwater. Wall, rock-column and arch hits bounce/slow the
+  ship; damage goes to the shield first, then the hull (**HEALTH**; 0 = crash → checkpoint respawn). Every hit also
+  spills some water (see Round 26). An empty tank never ends the run — landing with < 10 % is a failed delivery.
 - **Dive / НЫРОК**: wings sweep back, canopy armour closes, engines turn cold turquoise, teal fog, muffled audio, bubbles,
   slower speed. **Air / ВОЗДУХ** ≈ 60 s; refills on the surface. Splashes on entry/exit and spray/wake when skimming.
 - **Force-field masts**: hit one → −300, its section's field flickers and collapses; inside an unshielded section the
   screen tints red, geiger crackle, **RAD** meter, **Health** drains ~5.5 %/s (−50 % while the shield holds; diving
   blocks ~90 %). Health 0 = fail.
 - **Water burn** (round 6): boost and thin air burn cargo water (see above).
-- Settlement B: auto-landing. Result: time, cargo, water delivered / burned, health, targets, masts, relays, LETHE hits, score (+cargo/health/time bonus), retry.
+- Settlement B: auto-landing. Result: water delivered (litres + %) as the headline, time, crashes, collected / spilled / burned water, health, targets, masts, relays, LETHE hits, score (+water/health/time bonus), retry.
 
 ## Structure
 ```
@@ -1213,3 +1215,145 @@ The UI now shows **one language at a time** — the old "EN / RU" pairs are gone
 **Adding a language:** create `src/lang/<code>.js` (copy `en.js`), import it in `src/i18n.js` and add it to `DICT` and `LANGS` with its native name. If its script needs a font, extend the `--cjk` stack or add an `html[lang=…]` rule in index.html.
 
 **Test hooks:** `window.__lethe.i18n` = `{ lang, setLang(code), missing(), missingAll(), t(), langs, keys() }`. `window.__lethe.debug.showResult(ok = true)` opens the result screen. Headless check: `/workspace/pwtools/r25i18n.mjs` covers every language at 915×412 and 640×360. It checks console and page errors, missing keys, leftover Cyrillic outside RU, EN/RU pairs, kill/dead words and overflow (menu, help box, HUD, crash message, stats), and writes screenshots to `shots/r25_<lang>_{menu,help,hud,stats}.png`.
+
+## Round 26 — Part 1 «Вода» / "Water": fill the tank, breach the barrier
+
+The river is the last live water; the LETHE barrier dams it. The Cormorant (RU «Баклан») now starts with an **empty tank**,
+fills it by diving, loses water to every hit, and delivers it through a short-lived breach in the indestructible barrier.
+
+**Water (all numbers in % of the 6 000 L tank, constants at the top of each block in `src/main.js`)**
+
+| | value | constant |
+|---|---|---|
+| Start | **0 %** | `freshState().cargo` |
+| Fill while submerged (hull under, y < −0.6) | **3.0 %/s** into an empty tank, slowing linearly to **1.5 %/s** at full (`× (1 − 0.5·tank)`) | `FILL_RATE`, `FILL_SLOW` |
+| One dive takes at most | **35 %** (≈ 13–17 s under); then `INTAKE FULL — SURFACE` | `DIVE_CAP` |
+| Intake flushes after | **4 s** on the surface (no chain-diving: the tank fills over the route) | `SURF_RESET` |
+| Hit absorbed by the shield | **0.1 % per damage point** spills (turret bolt 9 → 0.9 %, mine 34 → 3.4 %) | `SPILL_SHIELD` |
+| Hit past the shield | **0.3 % per point** spills (bolt → 2.7 %) + the damage goes to the hull | `SPILL_HULL` |
+| Minimum spill per hit (if any water) | **0.25 %** | `SPILL_MIN` |
+| Gentle riverbed scrape (grinding along the bottom, no hull damage) | **0.4 %** every **0.8 s** of contact (≈ 0.5 %/s), with the `−x%` tick | `BED_SPILL`, `BED_SPILL_CD` |
+| Touching the LETHE curtain (outside an open breach) | **−50 % of the current tank**, knock-back 40 m/s (≈ 25 m), big shake, no hull damage; **1.6 s** cooldown | `FIELD_DRAIN`, `FIELD_KNOCK`, `FIELD_CD` |
+| Boost / thin-air burn (round 6) | unchanged (0.15 %/s × boost, +0.35 thin air), floor **5 %** | `BURN_*` |
+| Failed delivery | landing with **< 10 %** | `DELIVER_MIN` |
+| Score | **+40 per delivered %** (4 000 for a full tank) + health + time bonus | `WATER_PTS` |
+
+- Feedback: the TANK row turns cyan with a rising shimmer and a `FILLING` tag while the scoop works (the value shows one
+  decimal); `+x%` ticks appear next to the gauge every ~0.8 s, red `−x%` ticks on spills / field contact; a quiet
+  procedural gurgle (sine bubble blips on the UI bus, through master volume/mute) plays while filling; one-time toasts at
+  takeoff (`The tank is empty…`), on the first fill and on the first spill; `TANK FULL` + a soft chime at 100 %.
+- **Boost with an empty tank** simply works without burning water (the burn never takes the tank below its 5 % floor —
+  below that, boost is air-only). Nothing about handling changed, so an empty-tank start is never harder than before.
+- **Hull:** damage that gets past the shield now goes to HEALTH (it used to go to the cargo). Health 0 from hits =
+  crash (`HULL BROKEN`), from radiation/air = `PILOT INCAPACITATED`, both respawn at the last checkpoint.
+- **Checkpoints:** the snapshot stores the tank; a respawn gives back **exactly** the water held at that checkpoint
+  (the old "at least 40 %" floor is gone). No mercy refill: the tank starts empty anyway and the river is right there,
+  so a 0 % snapshot is a normal state; what you collected after the checkpoint is lost with the crash. Health ≥ 60 %,
+  shield ≥ 50 %, rockets ≥ 2 as before.
+- Autopilot (`?autopilot=1`) now makes water dives on the open river (until the dive's 35 % is in, air > 18 s).
+
+**Finale — antenna breach** (`src/gate.js`, gate block in `src/main.js`)
+
+- The curtain is indestructible. Three **antennas** stand on top of the gate beam (lat −0.58 / 0 / +0.58 × river
+  half-width, emitter ring ≈ 59 m up): armoured base, tapered lattice mast with cross-arms, a pulsing amber emitter ring
+  (the target, HDR glow sprite) and a blinking red tip. **8 HP** each: 8 cannon hits (≈ 1 s of fire) or **one rocket**.
+  Aim assist treats them like rim turrets (wide vertical cone), rockets home on them, brackets show an HP bar.
+- All three down → **BREACH**: a notch dissolves out of the curtain from the riverbed up to **28 m**, **28 m wide**
+  (±14 m around the river centre; the hull must be inside ±10.8 m / below 25.5 m), with a ragged flickering hex edge, a hot
+  rim and glow sprites along it. Open for **8 s** (`BREACH_DUR`); a big countdown sits top-centre, turning amber in the
+  last 3 s while the notch flickers. The hover hold releases while the breach is open.
+- Breach closes before you pass → `BREACH CLOSED — ANTENNAS REBOOTING`, the antennas flicker back after **5 s**
+  (`ANT_REBOOT`, on-screen countdown) at full HP; try again. No hard fail — each attempt costs time and usually water.
+- Two armoured **gun pods** under the beam (±0.86 × half-width) track the ship and fire red bolts (7 dmg, every
+  1.5–2.3 s, faster while the breach is open) whenever the ship is above water and in sight — diving hides you.
+- The hover arena is now **70 m** in front of the gate (`GATE_HOLD`, was 58) so the antennas sit at a comfortable ~20°
+  climb angle. Bolts / rockets above the curtain top (43 m) now fly over it (they used to die at the gate plane), and
+  through an open breach.
+- Flying through the open breach = delivery: `+1500 GATE`, LETHE's "…no. NO.", then the existing auto-landing at B and
+  the result screen. Touching the curtain anywhere else = the half-tank drain. A crash at the gate resets the antennas.
+- Removed: the three generator cores (incl. the underwater one), their fire, and all generator texts.
+
+**Result:** `WATER DELIVERED` is the first, large stat (`4 320 L · 72%`, cyan; red on failure). `DELIVERY FAILED /
+ДОСТАВКА СОРВАНА` with "The tank is almost empty — the settlement needs more water" below 10 %. The detail row shows
+`GATE BREACHED` (or antennas x / 3), `COLLECTED`, `SPILLED`, `BURNED` (litres).
+
+**Texts:** 26 new keys and 13 updated ones in all 12 languages (`hud.cargo` is now TANK / ЦИСТЕРНА, menu line and help
+mention filling the tank, the gate / breach / reboot / field / spill / intake / tank-full messages, result labels).
+Removed keys: `lbl.core`, `msg.genDown`, `msg.gateDown`, `toast.lastGen`, `fail.cargo`, `msg.cargoCritical`, `st.cargo`,
+`st.gateBroken`. `missingAll()` is empty for every language.
+
+**Cache-busting (GitHub Pages):** `export const BUILD = 'r26'` in `src/main.js` (shown tiny in the start-menu corner).
+The main module script, the manifest link, `music.json` and **every** relative ES-module import in `src/` and
+`src/lang/` carry `?v=r26` — all imports of a module must use the identical URL, otherwise the browser would load two
+copies. Next round: run **`tools/bump-build.sh r27`** (one command rewrites every `?v=` tag and the BUILD line).
+Vendored three.js (import map), the ship GLBs and the music files keep stable URLs (unchanged files, cache is fine).
+
+**Test hooks:** `__lethe.debug.tank()` (cargo, filling, fillRate, diveGain, intakeFull, gained / spilled / hitLoss /
+fieldDrained / burned, fieldTouches, health, shield), `debug.hit(n)`, `debug.hitAntenna(i, dmg)`, `debug.openBreach()`,
+`debug.breach()`, `debug.showResult(true | false | 'short')`; `state().gate` = `{state: armed|open|reboot, breachT,
+rebootT, open, passed, ants (hp), antKills, attempts, shots, hold}`. Headless checks: `/workspace/pwtools/r26.mjs`
+(mechanics), `r26shots.mjs` (screenshots), `r26auto.mjs` (autopilot run), `r25i18n.mjs` (all languages).
+
+
+**Round 26 tests** (headless Chromium + SwiftShader):
+- `r26.mjs` (mechanics, 915×412): 21/21 on the last full run before the draw-call merge. The final run was 20/21:
+  a gate-gun hit during the fly-through spilled 1 %, so it arrived with 71 % against an exact-72 % assertion; that
+  assertion is now `≥ 65 %`. Checked: the tank starts at 0; it rises underwater (`FILLING` tag + cyan row); one dive caps
+  at 35 %; a quick re-dive gets nothing (intake full); a dive after 4 s on the surface fills again; a shielded hit spills
+  (8 dmg → −0.8 %, hull untouched); an unshielded hit spills more and hits the hull; the `−x%` tick shows; field contact
+  halves the tank exactly, with no second drain inside the cooldown and a knock-back of > 15 m in 0.9 s;
+  2 / 3 antennas down = still armed; 3 down = breach open (8 s) and the countdown shows; the breach closes → reboot →
+  antennas back at full HP after 5 s; real cannon fire from the hover arena takes antennas down; flying through the open
+  breach passes the gate → landing → `MISSION COMPLETE`, `4 280 L · 71%`; landing with 6 % → `DELIVERY FAILED`; no
+  console errors.
+- `r26auto.mjs` (autopilot, full route, 915×412): **delivered 94 % (5 650 L)** in 3:07.7, with 0 crashes and the gate
+  breached on the first attempt. It collected 118.5 % in total over ~6 dives (the tank was full by ~2.45 km), spilled
+  15.4 % and burned 9 %. No console errors. The autopilot dodges far better than a person, so expect less water from
+  human play. The same run with a forced drain after the gate gives the failed-delivery screen
+  (`shots/r26_result_fail.png`).
+- `r25i18n.mjs`: all 12 languages at 915×412 and 640×360 pass. That covers no errors, `missing()` empty, no Cyrillic
+  outside RU, no EN/RU pairs, no kill/death words, and no overflow in menu / help / HUD / stats.
+- `r26of.mjs` (new strings: FILLING / INTAKE FULL tag, `±%` tick, gate / breach / reboot toasts, field message, breach
+  and reboot cues, failed-delivery result): de, fr, pt-BR, es, hi, id, ru and en at 640×360 and 915×412 show no overflow.
+  The first pass flagged the row's existing 0.5 s hit-pulse animation (`translateX(3px)`), which is not a layout overflow.
+- Perf (`r26perf.mjs`, `q=med`, SwiftShader):
+  - Mid-route: identical to r25 (102 draw calls, 223 k triangles).
+  - At the gate: +5 draw calls (84 → 89) and +0.6 k triangles. The antenna housings and gun mounts are merged into the
+    frame mesh.
+  - Median frame time is within noise (r25 96.9 ms vs r26 89.8 ms at the gate under SwiftShader).
+- Shots: `shots/r26_tank_filling_underwater.png`, `r26_antennas.png`, `r26_breach_open.png`, `r26_result.png` (real
+  autopilot run), `r26_result_fail.png`, `r26_menu_ru.png`.
+
+### Round 26 fix pass (Codex review)
+
+- **A missed breach no longer leaves the ship stuck by the gate (P1).** While the breach is shut, a ship closer than
+  the arena distance (a breach that closed during the approach, or a knock-back that fell short) is eased back out to
+  ~`GATE_HOLD` (70 m). The return speed is 0.9 × the overshoot, clamped to 4–28 m/s, and forward speed is held at 0. This
+  happens before the antennas reboot, so they are back at a normal aiming angle.
+- **A respawn now restores the gate (P2).** Every checkpoint lies before the gate, so a respawn always resets it: antennas
+  up, notch shut, `passed` false, cooldowns cleared, and `G.gateT` back to null. This also applies after a crash past
+  the breach. The +1500 gate bonus is paid only once per run.
+- **Crossing respects the breach bounds (P2).** The old "`GATE.open > 0.3` within 1 m of the plane" shortcut is gone.
+  Every frame within 6 m of the curtain checks the hull against the notch (inner ±10.8 m, below 25.5 m). The breach must
+  also be logically open (`state === 'open'`), not just visibly open. Leaving the notch on that approach counts as field
+  contact. The pass itself is swept: it needs the frame that carries the ship from `≤ GATE_S` to `> GATE_S` to be inside
+  the open notch, so a large frame step can't tunnel. The visible notch now also snaps shut faster once the breach is
+  logically closed. Projectiles use the same logical state.
+- **Gentle bed scrapes cost water (P2).** Scrapes cost a little water, as in the table above. The hull is still
+  untouched: hard bed impacts keep the round-23 collision damage.
+- Debug: `debug.hullFloor(s, lat)`; `debug.tank()` adds `bedScrapes` and `bedSpilled`.
+- Targeted test `/workspace/pwtools/r26fix.mjs`: **12/12 pass, no console errors**. It covers:
+  - **Return to arena:** a breach closes with the ship 34 m out and approaching. The ship returns to ≥ 60 m out, gets an
+    antenna aim lock after the reboot, and the cannon takes an antenna down.
+  - **Bounds:** lat 18 / y 35 inside an open breach is field contact, not a pass. Climbing out of the notch before the
+    plane is blocked. Just after the logical close is blocked. A centred crossing passes.
+  - **Respawn:** a crash after crossing respawns at 7150 with the gate armed, not passed, `gateT` null, and the curtain
+    blocks and drains again.
+  - **Scrape:** a bed scrape spills water and shows the `−` tick, with no hull damage and no bed hits.
+
+- Regression after the fix pass:
+  - `r26.mjs`: **21/21**.
+  - `r26auto.mjs`: delivered **95 % (5 710 L)** in 3:05.2, with 0 crashes, the breach on the first attempt and no
+    console errors. `shots/r26_result.png` was re-taken from this run.
+  - `r25i18n.mjs`: 24/24 language × size runs pass, `missingAll` is empty and there are no errors.
+  - `r26of.mjs`: 0 fails across 8 languages × 2 sizes.

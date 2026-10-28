@@ -1,7 +1,7 @@
 // Canyon spline, cross-section profile functions and procedural level layout.
 // Everything is expressed in "path space": s = distance along the canyon,
 // lat = lateral offset (right positive), y = height above river surface.
-import { clamp, lerp, smoothstep, noise1, noise2, fbm2, rng } from './util.js';
+import { clamp, lerp, smoothstep, noise1, noise2, fbm2, rng } from './util.js?v=r26';
 
 export const S0 = -400;          // terrain starts here
 export const S_END = 8750;       // terrain ends here
@@ -172,7 +172,7 @@ export const WRECK = { s: 2960, side: -1 };
 
 // Round 16 finale: the LETHE gate spans the canyon ~0.5 km before settlement B. Its approach is kept clear of rock columns
 // (the ship hovers in front of it while the generators are up).
-export const GATE_S = PAD_B - 540, GATE_HOLD = 58, GATE_BEAM = 46;
+export const GATE_S = PAD_B - 540, GATE_HOLD = 70, GATE_BEAM = 46;
 for (let i = ROCKS.length - 1; i >= 0; i--) if (ROCKS[i].s > GATE_S - 150 && ROCKS[i].s < GATE_S + 40) ROCKS.splice(i, 1);
 
 // Round 18: checkpoints along the canyon (the start counts as checkpoint 0). Chosen clear of arches, just past the

@@ -337,6 +337,21 @@ export class Audio {
     this.env(g, t, o.attack || 0.004, peak, dec);
     osc.start(t); osc.stop(t + dec + 0.08);
   }
+  // ---------------------------------------------------------------- round 26: tank filling
+  // soft gurgle while the scoop takes water: a quiet bubble blip (upward chirp) on the UI bus, so the underwater
+  // low-pass doesn't swallow it; pitch rises a little as the tank fills. Goes through the master volume / mute.
+  gurgle(full = 0) {
+    if (!this.ctx) return;
+    const f = 260 + Math.random() * 220 + full * 160;
+    this.tone('sine', f, f * (1.5 + Math.random() * 0.5), 0.022 + Math.random() * 0.012, 0.06 + Math.random() * 0.05, 0, { ui: true, attack: 0.008 });
+    if (Math.random() < 0.35) this.noiseHit('bandpass', 700 + Math.random() * 500, 6, 0.012, 0.09, 1400, { ui: true, attack: 0.01 });
+  }
+  tankFull() {
+    if (!this.ctx) return;
+    this.tone('sine', 660, 662, 0.07, 0.35, 0, { ui: true });
+    this.tone('sine', 990, 992, 0.06, 0.45, 0.12, { ui: true });
+    this.tone('triangle', 1320, 1322, 0.035, 0.6, 0.24, { ui: true });
+  }
   // ---------------------------------------------------------------- weapons
   // LETHE-signature energy cannon: glassy crack + tight sub thump + bright "tchk" chirp + canyon slap.
   // ±7 % random pitch/filter per shot; twin cannons alternate left/right.
@@ -514,7 +529,7 @@ export class Audio {
     try {
       const base = new URL('assets/music/', document.baseURI).href;
       if (!this.man) {
-        const r0 = await fetch(base + 'music.json', opt);
+        const r0 = await fetch(base + 'music.json?v=r26', opt);
         if (!r0.ok) throw new Error('music.json ' + r0.status);
         this.man = await r0.json();
       }

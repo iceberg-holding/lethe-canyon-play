@@ -1,5 +1,5 @@
 // Keyboard, mouse, multi-touch virtual stick / buttons and optional gyro tilt.
-import { clamp } from './util.js';
+import { clamp } from './util.js?v=r26';
 
 export const input = {
   x: 0, y: 0, fire: false, boost: false, dive: false,
