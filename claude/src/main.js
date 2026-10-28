@@ -1,31 +1,32 @@
-import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r28';
+import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r29';
 // LETHE / ЛЕТА — "Delivery" prototype. Game loop, flight model, shooting, shield, LETHE spotters
 // and turrets, hazards, camera, HUD, adaptive quality.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { clamp, lerp, damp, smoothstep } from './util.js?v=r28';
+import { clamp, lerp, damp, smoothstep } from './util.js?v=r29';
 import {
   PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
   ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, zoneLinked, resetLevel,
   MINES, HUNTERS, BOATS, bedY, underLim, GATE_S, GATE_HOLD, GATE_BEAM, CHECKPOINTS,
   isWet, RIVER_A,
-} from './world.js?v=r28';
-import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r28';
+} from './world.js?v=r29';
+import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r29';
 import {
   buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP, BOAT_FEATURES,
-} from './naval.js?v=r28';
+} from './naval.js?v=r29';
 import {
   buildChunks, buildWater, buildDryBed, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS, FALLS,
-} from './terrain.js?v=r28';
-import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r28';
-import { Ship, makeEnvMap } from './ship.js?v=r28';
-import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r28';
-import { input, setupInput, pollInput } from './input.js?v=r28';
-import { Post, QualityGovernor, TIERS } from './post.js?v=r28';
+} from './terrain.js?v=r29';
+import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r29';
+import { Ship, makeEnvMap } from './ship.js?v=r29';
+import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r29';
+import { input, setupInput, pollInput } from './input.js?v=r29';
+import { Post, QualityGovernor, TIERS } from './post.js?v=r29';
 // round 26: build tag for cache-busting. Every relative import / the main script / the manifest carry ?v=<BUILD>;
 // tools/bump-build.sh <tag> rewrites them all (and this line) in one go.
-export const BUILD = 'r28';
-import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r28';   // tx: `t` is a common local name here (phase timers, torpedoes)
+export const BUILD = 'r29';
+import { films } from './films.js?v=r29';   // round 29: Part 1 films overlay
+import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r29';   // tx: `t` is a common local name here (phase timers, torpedoes)
 applyDom();   // round 25: localise the static DOM before the first frame
 
 THREE.ColorManagement.enabled = false;
@@ -3777,7 +3778,7 @@ function resultText() {
   set('rBurned', `${fmtL(litres(G.waterBurned))}`);
   $('rWaterRow')?.classList.toggle('bad', !ok);
 }
-function showResult() {
+function showResult(noFilm = false) {
   G.phase = 'result';
   if (G.outcome === 'delivered' && Math.round(G.cargo) < DELIVER_MIN) G.outcome = 'short';
   const ok = G.outcome === 'delivered';
@@ -3804,9 +3805,11 @@ function showResult() {
   set('rBoats', `${G.boatKills} / ${N_BOAT_REAL}`);
   set('rHits', `${G.turretHits} / ${G.turretShotsFired}`);
   set('rScore', G.finalScore + (ok ? ` (+${G.waterBonus + timeBonus})` : ''));
-  $('result')?.classList.remove('hide');
   document.body.classList.remove('playing');
   input.active = false;
+  // round 29: success (>= DELIVER_MIN %) or fail film first, then the flight-recorder screen (film is skippable)
+  const reveal = () => { if (G.phase === 'result') $('result')?.classList.remove('hide'); };
+  if (!noFilm && films.enabled) { G.resultFilm = ok ? 'success' : 'fail'; films.play(G.resultFilm).then(reveal); } else { G.resultFilm = null; reveal(); }
 }
 function toMenu() {
   reset();
@@ -3815,6 +3818,7 @@ function toMenu() {
 }
 
 function reset() {
+  if (films.active) films.skip();   // round 29
   endTutorial(); TUT.phase = 'idle'; TUT.boat = null;
   endIntro(); INTRO.shown = [];
   resetLevel();
@@ -3861,6 +3865,19 @@ function startGame() {
   G.phase = 'takeoff'; G.phaseT = 0; G.t = 0;
   showMsg(tx('msg.takeoff'), 2.2);
 }
+// round 29: mission launch from the menu / retry: intro once per device, then the briefing (unless switched off)
+const INTRO_SEEN_KEY = 'lethe.introSeen', BRIEF_KEY = 'lethe.briefing';
+films.enabled = !AUTOPILOT && params.get('films') !== '0';
+let briefOn = lsGet(BRIEF_KEY) !== '0', launching = false;
+async function launch() {
+  if (G.phase !== 'start' || launching) return;
+  launching = true;
+  try {
+    if (!lsGet(INTRO_SEEN_KEY)) { const r = await films.play('intro'); if (r !== 'off') lsSet(INTRO_SEEN_KEY, '1'); }
+    if (briefOn && G.phase === 'start') await films.play('briefing');
+  } finally { launching = false; }
+  startGame();
+}
 // round 23: fullscreen (hides the Android Chrome address bar) + landscape lock where supported; silent no-op on iPhone
 const fsRoot = document.documentElement;
 const fsCan = !!(fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen) && (document.fullscreenEnabled ?? document.webkitFullscreenEnabled ?? true) !== false;
@@ -3888,9 +3905,18 @@ $('start').addEventListener('click', () => {
   const st = $('start');
   if (st.classList.contains('help')) { st.classList.remove('help'); return; }
   if (isTouch) goFullscreen();
-  startGame();
+  launch();
 });
-$('retry').addEventListener('click', (e) => { e.stopPropagation(); reset(); startGame(); });
+$('retry').addEventListener('click', (e) => { e.stopPropagation(); reset(); launch(); });
+// round 29: REPLAY INTRO (menu) + BRIEFING on/off (menu settings, remembered)
+$('replayIntro')?.addEventListener('click', (e) => { e.stopPropagation(); if (isTouch) goFullscreen(); e.currentTarget.blur(); films.play('intro'); });
+const briefSeg = document.querySelector('#briefSel .seg');
+function syncBrief() { if (briefSeg) for (const b of briefSeg.children) b.classList.toggle('on', (b.dataset.v === '1') === briefOn); }
+if (briefSeg) for (const b of briefSeg.children) {
+  b.addEventListener('click', (ev) => { ev.stopPropagation(); audio.init(); audio.click(); briefOn = b.dataset.v === '1'; lsSet(BRIEF_KEY, briefOn ? '1' : '0'); syncBrief(); b.blur(); });
+  b.addEventListener('keydown', (ev) => ev.stopPropagation());
+}
+syncBrief();
 $('menuBtn')?.addEventListener('click', (e) => { e.stopPropagation(); toMenu(); });
 function syncSnd(muted) {
   hud.snd.classList.toggle('muted', muted);
@@ -3978,6 +4004,7 @@ if (langPick) {
   for (const ev of ['click', 'pointerdown', 'keydown']) $('langBox').addEventListener(ev, (e) => e.stopPropagation());
 }
 onLang((code) => {
+  films.relabel();   // round 29
   hud.spdV = -1;   // round 27: re-print the speed unit
   if (langPick) langPick.value = code;
   const q = $('qual'); if (q) q.textContent = tx('hud.quality', { q: quality.toUpperCase() });
@@ -4009,8 +4036,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyM' && !e.repeat) audio.toggleMute();
   if (e.code === 'KeyN' && !e.repeat) setMusic(!audio.musicOn, G.phase !== 'start');
   if (e.code === 'Enter' || e.code === 'Space') {
-    if (G.phase === 'start') startGame();
-    else if (G.phase === 'result') { reset(); startGame(); }
+    if (G.phase === 'start') launch();
+    else if (G.phase === 'result' && !$('result').classList.contains('hide')) { reset(); launch(); }
   }
 });
 const unlock = () => audio.init();
@@ -4233,6 +4260,7 @@ let realDt = 0.016, time = 0, fps = 60, fpsAcc = 0, fpsN = 0, frames = 0;
 const portraitMQ = matchMedia('(orientation: portrait) and (max-width: 900px)');
 function loop(now) {
   requestAnimationFrame(loop);
+  if (films.active) { clock.getDelta(); return; }   // round 29: a film is on: the game is paused (no sim, no render)
   if (now !== undefined && !frameDue(now)) return;
   const rawDt = clock.getDelta();
   realDt = Math.min(rawDt, 0.25);
@@ -4370,7 +4398,7 @@ window.__lethe = {
   state: () => ({
     t: +G.t.toFixed(2), speed: +G.speed.toFixed(2), distToB: +Math.max(0, PAD_B - G.s).toFixed(1), cargo: +G.cargo.toFixed(1), hull: +G.cargo.toFixed(1),
     health: +Math.max(0, G.health).toFixed(1), air: +G.air.toFixed(1), score: G.phase === 'result' ? G.finalScore : G.score,
-    underwater: G.underwater, phase: G.phase, outcome: G.outcome, s: +G.s.toFixed(1), lat: +G.lat.toFixed(2), y: +G.y.toFixed(2),
+    underwater: G.underwater, phase: G.phase, outcome: G.outcome, resultFilm: G.resultFilm, film: films.active ? films.name : null, s: +G.s.toFixed(1), lat: +G.lat.toFixed(2), y: +G.y.toFixed(2),
     dive: G.dive, radiation: +G.rad.toFixed(3),
     waterBurned: +G.waterBurned.toFixed(3), waterSpilled: +G.waterSpilled.toFixed(2), burnRate: +G.burnRate.toFixed(3), thinAir: G.thinAir, steam: +G.steam.toFixed(2),
     burnTag: hud.rowCargo.classList.contains('burn'), mastsBroken: G.mastsBroken, kills: G.kills,
@@ -4416,6 +4444,8 @@ window.__lethe = {
     boatFeatures: BOAT_FEATURES,
   }),
   start: startGame,
+  launch: () => launch(),   // round 29: menu path (intro once, briefing)
+  films,
   retry: () => { reset(); startGame(); },
   warp: (s) => { G.s = s; camInit = false; },
   input,
@@ -4446,7 +4476,8 @@ window.__lethe = {
     kill: () => fail('fail.debug'),
     // round 25: jump straight to the result screen (stats layout / i18n checks); ok=false shows the failure variant
     // ok = true | false | 'short' (failed delivery: lands with < DELIVER_MIN %)
-    showResult: (ok = true) => { G.outcome = ok === 'short' ? 'delivered' : ok ? 'delivered' : 'failed'; if (ok === 'short') G.cargo = Math.min(G.cargo, 6); else if (ok && G.cargo < DELIVER_MIN) G.cargo = 88; if (!ok) { G.reasonKey = 'fail.hull'; G.reason = tx('fail.hull'); } showResult(); return G.phase; },
+    resultAt: (pct, film = true) => { G.outcome = 'delivered'; G.cargo = pct; showResult(!film); return G.outcome; },   // round 29: landing with pct %
+    showResult: (ok = true, film = false) => { G.outcome = ok === 'short' ? 'delivered' : ok ? 'delivered' : 'failed'; if (ok === 'short') G.cargo = Math.min(G.cargo, 6); else if (ok && G.cargo < DELIVER_MIN) G.cargo = 88; if (!ok) { G.reasonKey = 'fail.hull'; G.reason = tx('fail.hull'); } showResult(!film); return G.phase; },
     // round 26 water / gate hooks
     tank: () => ({ air: +G.air.toFixed(2), jetLock: G.jetLock, overheats: G.overheats, dives: G.dives, dive: G.dive, underwater: G.underwater, msg: hud.msg ? hud.msg.textContent : '', load: +G.load.toFixed(3), speed: +G.speed.toFixed(1), cargo: +G.cargo.toFixed(2), filling: G.filling, skimming: G.skimming, skimmed: +G.waterSkimmed.toFixed(2), skim: +(G.skim || 0).toFixed(2), fillRate: +(G.fillRate || 0).toFixed(2), diveGain: +G.diveGain.toFixed(2), intakeFull: G.intakeFull,
       gained: +G.waterGained.toFixed(2), spilled: +G.waterSpilled.toFixed(2), hitLoss: +G.waterHitLoss.toFixed(2), fieldDrained: +G.fieldDrained.toFixed(2), burned: +G.waterBurned.toFixed(2),
