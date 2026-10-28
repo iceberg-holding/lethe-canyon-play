@@ -202,6 +202,7 @@ export default {
   'fail.hull': '船体损毁',
   'toast.tankEmpty': '<b>水箱是空的。</b>潜入河中灌水——一路上要潜好几次。',
   'toast.fillFirst': '<b>正在灌水！</b>保持在水下——每次下潜都能灌进一部分。',
+  'toast.skim': '<b>贴水飞行也能取水</b>——但很慢。下潜灌得快得多。',
   'toast.spill': '<b>中弹会洒水</b>——就算有护盾也一样。',
   'toast.breach': '<b>趁缺口关闭前飞过去！</b>',
   'toast.letheReboot': 'LETHE：<em>“……重启中。再试一次吧，小鸟。”</em>',

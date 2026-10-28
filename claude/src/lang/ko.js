@@ -202,6 +202,7 @@ export default {
   'fail.hull': '선체 파손',
   'toast.tankEmpty': '<b>탱크가 비어 있습니다.</b> 강에 잠수해서 채우세요 — 여러 번 잠수해야 합니다.',
   'toast.fillFirst': '<b>급수 중!</b> 물속에 머무르세요 — 잠수할 때마다 조금씩 찹니다.',
+  'toast.skim': '<b>수면 비행으로 물을 퍼 담습니다</b> — 천천히. 잠수가 훨씬 빠릅니다.',
   'toast.spill': '<b>피격되면 물이 쏟아집니다</b> — 실드가 있어도요.',
   'toast.breach': '<b>틈이 닫히기 전에 통과하세요!</b>',
   'toast.letheReboot': 'LETHE: <em>“…재부팅 중. 다시 해 봐, 꼬마 새야.”</em>',

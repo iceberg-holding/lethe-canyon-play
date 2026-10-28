@@ -5,8 +5,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { lerp, sanitizeNormals } from './util.js?v=r27';
-import { shipTextures } from './textures.js?v=r27';
+import { lerp, sanitizeNormals } from './util.js?v=r28';
+import { shipTextures } from './textures.js?v=r28';
 
 // loft an octagonal armoured cross-section along z
 function loft(sections, prof) {

@@ -202,6 +202,7 @@ export default {
   'fail.hull': 'CASCO DESTRUÍDO',
   'toast.tankEmpty': '<b>O tanque está vazio.</b> Mergulhe no rio para enchê-lo — vai precisar de vários mergulhos.',
   'toast.fillFirst': '<b>Enchendo o tanque!</b> Fique embaixo — cada mergulho soma uma parte.',
+  'toast.skim': '<b>Voo rasante recolhe água</b> — devagar. Mergulhar enche bem mais rápido.',
   'toast.spill': '<b>Impactos derramam água</b> — mesmo através do escudo.',
   'toast.breach': '<b>Passe pela brecha antes que ela feche!</b>',
   'toast.letheReboot': 'LETHE: <em>“…reiniciando. Tenta de novo, passarinho.”</em>',

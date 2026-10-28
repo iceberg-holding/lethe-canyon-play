@@ -202,6 +202,7 @@ export default {
   'fail.hull': 'LAMBUNG HANCUR',
   'toast.tankEmpty': '<b>Tangkinya kosong.</b> Menyelamlah ke sungai untuk mengisinya — perlu beberapa kali menyelam.',
   'toast.fillFirst': '<b>Tangki terisi!</b> Tetap di bawah — tiap selaman menambah sebagian.',
+  'toast.skim': '<b>Terbang rendah menyendok air</b> — pelan. Menyelam mengisi jauh lebih cepat.',
   'toast.spill': '<b>Tembakan yang kena menumpahkan air</b> — meski ada perisai.',
   'toast.breach': '<b>Terbang lewat celah sebelum tertutup!</b>',
   'toast.letheReboot': 'LETHE: <em>“…mulai ulang. Coba lagi, burung kecil.”</em>',

@@ -202,6 +202,7 @@ export default {
   'fail.hull': 'COQUE BRISÉE',
   'toast.tankEmpty': '<b>La citerne est vide.</b> Plongez dans le fleuve pour la remplir — il faudra plusieurs plongées.',
   'toast.fillFirst': '<b>Remplissage !</b> Restez sous l’eau — chaque plongée ajoute sa part.',
+  'toast.skim': '<b>En rase-mottes, on écope de l’eau</b> — lentement. Plonger remplit bien plus vite.',
   'toast.spill': '<b>Les impacts font perdre de l’eau</b> — même à travers le bouclier.',
   'toast.breach': '<b>Passez la brèche avant qu’elle ne se referme !</b>',
   'toast.letheReboot': 'LETHE : <em>« …redémarrage. Encore un essai, petit oiseau. »</em>',

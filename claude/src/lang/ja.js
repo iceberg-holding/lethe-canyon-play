@@ -202,6 +202,7 @@ export default {
   'fail.hull': '船体大破',
   'toast.tankEmpty': '<b>タンクは空っぽ。</b>川に潜って水をためよう——何度か潜る必要がある。',
   'toast.fillFirst': '<b>給水中！</b>潜ったままで——1回の潜航ごとに少しずつたまる。',
+  'toast.skim': '<b>水面すれすれで少しずつ給水</b>——ゆっくり。潜るほうがずっと速い。',
   'toast.spill': '<b>被弾すると水がこぼれる</b>——シールド越しでも。',
   'toast.breach': '<b>裂け目が閉じる前に抜けろ！</b>',
   'toast.letheReboot': 'LETHE：<em>「……再起動。もう一回どうぞ、小鳥さん。」</em>',

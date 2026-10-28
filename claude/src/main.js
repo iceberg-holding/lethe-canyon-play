@@ -1,31 +1,31 @@
-import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r27';
+import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r28';
 // LETHE / ЛЕТА — "Delivery" prototype. Game loop, flight model, shooting, shield, LETHE spotters
 // and turrets, hazards, camera, HUD, adaptive quality.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { clamp, lerp, damp, smoothstep } from './util.js?v=r27';
+import { clamp, lerp, damp, smoothstep } from './util.js?v=r28';
 import {
   PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
   ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, zoneLinked, resetLevel,
   MINES, HUNTERS, BOATS, bedY, underLim, GATE_S, GATE_HOLD, GATE_BEAM, CHECKPOINTS,
   isWet, RIVER_A,
-} from './world.js?v=r27';
-import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r27';
+} from './world.js?v=r28';
+import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r28';
 import {
   buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP, BOAT_FEATURES,
-} from './naval.js?v=r27';
+} from './naval.js?v=r28';
 import {
   buildChunks, buildWater, buildDryBed, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS, FALLS,
-} from './terrain.js?v=r27';
-import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r27';
-import { Ship, makeEnvMap } from './ship.js?v=r27';
-import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r27';
-import { input, setupInput, pollInput } from './input.js?v=r27';
-import { Post, QualityGovernor, TIERS } from './post.js?v=r27';
+} from './terrain.js?v=r28';
+import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r28';
+import { Ship, makeEnvMap } from './ship.js?v=r28';
+import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r28';
+import { input, setupInput, pollInput } from './input.js?v=r28';
+import { Post, QualityGovernor, TIERS } from './post.js?v=r28';
 // round 26: build tag for cache-busting. Every relative import / the main script / the manifest carry ?v=<BUILD>;
 // tools/bump-build.sh <tag> rewrites them all (and this line) in one go.
-export const BUILD = 'r27';
-import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r27';   // tx: `t` is a common local name here (phase timers, torpedoes)
+export const BUILD = 'r28';
+import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r28';   // tx: `t` is a common local name here (phase timers, torpedoes)
 applyDom();   // round 25: localise the static DOM before the first frame
 
 THREE.ColorManagement.enabled = false;
@@ -421,7 +421,7 @@ function freshState() {
     scan: 0, scanWant: 0, scanCap: 62, scanPhase: 'off', scanBoat: -1, scanDrawn: 0,
     act: -1, shots: 0, shotHits: 0, antKills: 0, deaths: 0, gateT: null,   // round 16
     knockV: 0, retreatV: 0, gatePaid: false, bedSpillCd: 0, bedSpilled: 0, waterHitLoss: 0, intakeFull: false, fieldDrained: 0, fieldTouches: 0, gateShots: 0,   // round 26
-    waterGained: 0, diveGain: 0, surfT: 9, filling: false, fillTickT: 0, tickAcc: 0, tickT: 0, fullSaid: false, fillHinted: false, spillHinted: false, gurgleT: 0,
+    waterGained: 0, diveGain: 0, surfT: 9, filling: false, fillTickT: 0, tickAcc: 0, tickT: 0, fullSaid: false, fillHinted: false, skimHinted: false, skimming: false, skimT: 0, waterSkimmed: 0, spillHinted: false, gurgleT: 0,
     cp: -1, cpSnap: null, invuln: 0, respawn: false,   // round 18
   };
 }
@@ -3126,6 +3126,7 @@ function updateHazards(dt) {
 // FILL_RATE %/s into an empty tank, slowing linearly to (1 - FILL_SLOW) of that when full. One dive takes at most
 // DIVE_CAP % — the intake filter clogs; staying on the surface ≥ SURF_RESET s flushes it for the next dive.
 const FILL_RATE = 3.5, FILL_SLOW = 0.5, DIVE_CAP = 35, SURF_RESET = 4;   // round 27: 3.0 -> 3.5 (a 10 s dive ≈ 32 % from empty)
+const SKIM_RATE = 0.85, SKIM_FULL = 0.75;   // round 28: %/s while skimming at intensity >= SKIM_FULL (dive 3.5 %/s)
 function waterTick(d) {
   const el = hud.tankTick;
   if (!el) return;
@@ -3143,15 +3144,27 @@ function updateTank(dt) {
   else { G.surfT += dt; if (G.surfT > SURF_RESET) G.diveGain = 0; }
   const scoop = fl && G.underwater;
   const rate = scoop && G.cargo < 100 ? FILL_RATE * (1 - FILL_SLOW * G.cargo / 100) : 0;
-  const d = Math.max(0, Math.min(rate * dt, 100 - G.cargo, DIVE_CAP - G.diveGain));
+  let d = Math.max(0, Math.min(rate * dt, 100 - G.cargo, DIVE_CAP - G.diveGain));
+  // round 28: skimming low over the wet river scoops a little water through the intake lip (no hydrojet heat, no
+  // dive cap): SKIM_RATE %/s at full skim intensity (G.skim, from last frame's spray), ~4-5x slower than a dive.
+  const skimK = fl && !G.underwater && isWet(G.s) ? clamp((G.skim || 0) / SKIM_FULL, 0, 1) : 0;
+  const skimD = d === 0 && skimK > 0.05 && G.cargo < 100 ? Math.min(SKIM_RATE * skimK * dt, 100 - G.cargo) : 0;
+  G.skimming = skimD > 0;
+  if (G.skimming) G.waterSkimmed += skimD;
+  const diveD = d;
+  d += skimD;
   G.filling = d > 0;
   G.fillRate = G.filling ? rate : 0;
+  G.skimT = G.skimming ? (G.skimT || 0) + dt : 0;
   G.intakeFull = scoop && !G.filling && G.cargo < 99.9;
   if (G.filling) {
-    G.cargo = Math.min(100, G.cargo + d); G.diveGain += d; G.waterGained += d; G.tickAcc += d;
+    G.cargo = Math.min(100, G.cargo + d); G.diveGain += diveD; G.waterGained += d; G.tickAcc += d;
+    G.fillRate = diveD > 0 ? rate : SKIM_RATE * skimK;
     G.gurgleT -= dt;
-    if (G.gurgleT <= 0) { audio.gurgle?.(G.cargo / 100); G.gurgleT = 0.1 + Math.random() * 0.17; }
-    if (!G.fillHinted) { G.fillHinted = true; toast(tx('toast.fillFirst'), 5, true); }
+    // round 28: skimming gurgles rarely (quiet, sparse scoop blips) — a dive keeps the dense gurgle
+    if (G.gurgleT <= 0) { audio.gurgle?.(G.cargo / 100); G.gurgleT = diveD > 0 ? 0.1 + Math.random() * 0.17 : 0.55 + Math.random() * 0.5; }
+    if (diveD > 0 && !G.fillHinted) { G.fillHinted = true; toast(tx('toast.fillFirst'), 5, true); }
+    if (G.skimming && !G.skimHinted && G.skimT > 1.2) { G.skimHinted = true; toast(tx('toast.skim'), 5, true); }
   }
   G.fillTickT -= dt;
   if (G.tickAcc > 0 && (G.fillTickT <= 0 || !G.filling)) {
@@ -4435,7 +4448,7 @@ window.__lethe = {
     // ok = true | false | 'short' (failed delivery: lands with < DELIVER_MIN %)
     showResult: (ok = true) => { G.outcome = ok === 'short' ? 'delivered' : ok ? 'delivered' : 'failed'; if (ok === 'short') G.cargo = Math.min(G.cargo, 6); else if (ok && G.cargo < DELIVER_MIN) G.cargo = 88; if (!ok) { G.reasonKey = 'fail.hull'; G.reason = tx('fail.hull'); } showResult(); return G.phase; },
     // round 26 water / gate hooks
-    tank: () => ({ air: +G.air.toFixed(2), jetLock: G.jetLock, overheats: G.overheats, dives: G.dives, dive: G.dive, underwater: G.underwater, msg: hud.msg ? hud.msg.textContent : '', load: +G.load.toFixed(3), speed: +G.speed.toFixed(1), cargo: +G.cargo.toFixed(2), filling: G.filling, fillRate: +(G.fillRate || 0).toFixed(2), diveGain: +G.diveGain.toFixed(2), intakeFull: G.intakeFull,
+    tank: () => ({ air: +G.air.toFixed(2), jetLock: G.jetLock, overheats: G.overheats, dives: G.dives, dive: G.dive, underwater: G.underwater, msg: hud.msg ? hud.msg.textContent : '', load: +G.load.toFixed(3), speed: +G.speed.toFixed(1), cargo: +G.cargo.toFixed(2), filling: G.filling, skimming: G.skimming, skimmed: +G.waterSkimmed.toFixed(2), skim: +(G.skim || 0).toFixed(2), fillRate: +(G.fillRate || 0).toFixed(2), diveGain: +G.diveGain.toFixed(2), intakeFull: G.intakeFull,
       gained: +G.waterGained.toFixed(2), spilled: +G.waterSpilled.toFixed(2), hitLoss: +G.waterHitLoss.toFixed(2), fieldDrained: +G.fieldDrained.toFixed(2), burned: +G.waterBurned.toFixed(2),
       fieldTouches: G.fieldTouches, bedScrapes: G.bedScrapes, bedSpilled: +(G.bedSpilled || 0).toFixed(2), health: +G.health.toFixed(1), shield: +G.shield.toFixed(1) }),
     hit: (n = 10) => damage(n, null, 'debug'),

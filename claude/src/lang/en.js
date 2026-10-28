@@ -210,6 +210,7 @@ export default {
   'fail.hull': 'HULL BROKEN',
   'toast.tankEmpty': '<b>The tank is empty.</b> Dive into the river to fill it — it takes several dives.',
   'toast.fillFirst': '<b>Filling the tank!</b> Stay under — each dive adds a share.',
+  'toast.skim': '<b>Skimming scoops water</b> — slowly. A dive fills much faster.',
   'toast.spill': '<b>Hits spill water</b> — even through the shield.',
   'toast.breach': '<b>Fly through the breach before it closes!</b>',
   'toast.letheReboot': 'LETHE: <em>“…rebooting. Try again, little bird.”</em>',

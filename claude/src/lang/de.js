@@ -202,6 +202,7 @@ export default {
   'fail.hull': 'RUMPF ZERBROCHEN',
   'toast.tankEmpty': '<b>Der Tank ist leer.</b> Tauch in den Fluss, um ihn zu füllen — das braucht mehrere Tauchgänge.',
   'toast.fillFirst': '<b>Der Tank füllt sich!</b> Bleib unten — jeder Tauchgang bringt einen Teil.',
+  'toast.skim': '<b>Tiefflug schöpft Wasser</b> — langsam. Tauchen füllt viel schneller.',
   'toast.spill': '<b>Treffer verschütten Wasser</b> — auch durch den Schild.',
   'toast.breach': '<b>Flieg durch die Bresche, bevor sie sich schließt!</b>',
   'toast.letheReboot': 'LETHE: <em>„…Neustart. Versuch’s noch mal, Vögelchen.“</em>',

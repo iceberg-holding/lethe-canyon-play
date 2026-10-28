@@ -202,6 +202,7 @@ export default {
   'fail.hull': 'KADŁUB ROZBITY',
   'toast.tankEmpty': '<b>Zbiornik jest pusty.</b> Zanurkuj w rzece, by go napełnić — potrzeba kilku nurkowań.',
   'toast.fillFirst': '<b>Napełnianie!</b> Zostań pod wodą — każde nurkowanie dodaje swoją część.',
+  'toast.skim': '<b>Lot tuż nad wodą nabiera wodę</b> — powoli. Nurkowanie napełnia dużo szybciej.',
   'toast.spill': '<b>Trafienia wylewają wodę</b> — nawet przez tarczę.',
   'toast.breach': '<b>Przeleć przez wyłom, zanim się zamknie!</b>',
   'toast.letheReboot': 'LETHE: <em>„…restart. Spróbuj jeszcze raz, ptaszyno.”</em>',
