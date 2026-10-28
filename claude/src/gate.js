@@ -4,8 +4,8 @@
 // Built once in the gate's local frame: x = lateral (right +), y = height above the river, -z = toward settlement B.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { colored, tr } from './naval.js?v=r26';
-import { frame, wallLat, riverHalf, GATE_S, GATE_BEAM } from './world.js?v=r26';
+import { colored, tr } from './naval.js?v=r27';
+import { frame, wallLat, riverHalf, GATE_S, GATE_BEAM } from './world.js?v=r27';
 
 export const ANT_HP = 8;                // cannon bolt = 1, rocket = 8 (one rocket per antenna)
 export const ANT_H = 13, ANT_Y = 10.5;   // mast height above the housing; emitter ring height above the beam top

@@ -1,30 +1,31 @@
-import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r26';
+import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r27';
 // LETHE / ЛЕТА — "Delivery" prototype. Game loop, flight model, shooting, shield, LETHE spotters
 // and turrets, hazards, camera, HUD, adaptive quality.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { clamp, lerp, damp, smoothstep } from './util.js?v=r26';
+import { clamp, lerp, damp, smoothstep } from './util.js?v=r27';
 import {
   PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
   ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, zoneLinked, resetLevel,
   MINES, HUNTERS, BOATS, bedY, underLim, GATE_S, GATE_HOLD, GATE_BEAM, CHECKPOINTS,
-} from './world.js?v=r26';
-import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r26';
+  isWet, RIVER_A,
+} from './world.js?v=r27';
+import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r27';
 import {
   buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP, BOAT_FEATURES,
-} from './naval.js?v=r26';
+} from './naval.js?v=r27';
 import {
-  buildChunks, buildWater, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS, FALLS,
-} from './terrain.js?v=r26';
-import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r26';
-import { Ship, makeEnvMap } from './ship.js?v=r26';
-import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r26';
-import { input, setupInput, pollInput } from './input.js?v=r26';
-import { Post, QualityGovernor, TIERS } from './post.js?v=r26';
+  buildChunks, buildWater, buildDryBed, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS, FALLS,
+} from './terrain.js?v=r27';
+import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r27';
+import { Ship, makeEnvMap } from './ship.js?v=r27';
+import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r27';
+import { input, setupInput, pollInput } from './input.js?v=r27';
+import { Post, QualityGovernor, TIERS } from './post.js?v=r27';
 // round 26: build tag for cache-busting. Every relative import / the main script / the manifest carry ?v=<BUILD>;
 // tools/bump-build.sh <tag> rewrites them all (and this line) in one go.
-export const BUILD = 'r26';
-import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r26';   // tx: `t` is a common local name here (phase timers, torpedoes)
+export const BUILD = 'r27';
+import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r27';   // tx: `t` is a common local name here (phase timers, torpedoes)
 applyDom();   // round 25: localise the static DOM before the first frame
 
 THREE.ColorManagement.enabled = false;
@@ -45,7 +46,9 @@ const TUT_R = 300, TUT_SLOW = 0.3, TUT_EASE = 0.4, TUT_HOLD = 3.0, TUT_PROMPT = 
 const TUT_CUE = 7;   // round 12: seconds after the tutorial dive during which a torpedo lock pulses the ROCKET button
 const TUT = { cueT: 0, cueSeen: false, phase: 'idle', t: 0, boat: null, hold: false, dist: 0, dived: false, outAt: 0, minScale: 1, count: 0, frozen: false, triggerAt: null, releaseAt: null, triggerS: null };
 let timeScale = 1;
-const NOBOOST = params.get('noboost') === '1';   // autopilot at cruise speed (timing tests)
+const NOBOOST = params.get('noboost') === '1';
+const APSLOP = +(params.get('apslop') || 0);
+const APDIVES = +(params.get('apdives') || 0);   // round 27: autopilot makes at most N voluntary water-fill dives (0 = no limit)   // round 27: 'human-like' sloppy autopilot (steering wobble, late breach reaction)   // autopilot at cruise speed (timing tests)
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 document.body.classList.toggle('touch', isTouch);
 // Round 6: water as reaction mass. The air-breathing plasma engines flash cargo water into steam/plasma when the
@@ -112,6 +115,7 @@ const terrainMat = makeTerrainMaterial();
 const chunks = buildChunks(scene, terrainMat);
 const waterMat = makeWaterMaterial(SUN, SUN2, HOR, ZEN);
 const waters = buildWater(scene, waterMat);
+const dryBed = buildDryBed(scene);   // round 27: dry riverbed outside the wet stretch, weir, held-back water face
 const foam = buildFoam(scene, FOG_D_AIR);
 const shafts = buildShafts(scene, SUN2);
 buildFields(scene, FOG_D_AIR);
@@ -361,7 +365,7 @@ const barEls = (id) => ({ v: $(id).querySelector('.v'), g: $(id).querySelector('
 const hud = {
   root: $('hud'), cargo: $('tCargo'), shield: $('tShield'), health: $('tHealth'), rad: $('tRad'), score: $('tScore'), speed: $('tSpeed'), dist: $('tDist'),
   bCargo: barEls('bCargo'), bShield: barEls('bShield'), bHealth: barEls('bHealth'), bRad: barEls('bRad'), bAir: barEls('bAir'), bMark: barEls('bMark'),
-  rowCargo: $('rCargoRow'), burnTag: $('burnTag'), rowShield: $('rShieldRow'), rowHealth: $('rHealthRow'),
+  tSpd: $('tSpd'), spdV: -1, rowCargo: $('rCargoRow'), burnTag: $('burnTag'), rowShield: $('rShieldRow'), rowHealth: $('rHealthRow'),
   air: $('tAir'), airBox: $('airBox'), msg: $('msg'), pop: $('pop'), toast: $('toast'), markBox: $('markBox'), markLbl: document.querySelector('#markBox .lbl span'), mark: $('tMark'), sDown: $('sDown'),
   routeShip: $('routeShip'), reticle: $('reticle'), tintUnder: $('tintUnder'), tintRad: $('tintRad'), tintHit: $('tintHit'), tintShield: $('tintShield'), tintLock: $('tintLock'),
   dive: $('btnDive'), rocketBtn: $('btnRocket'), rockets: $('tRockets'), pips: $('pips'), snd: $('snd'), hitx: $('hitx'), keys: $('keys'), engBtn: $('engBtn'), tut: $('tut'),
@@ -401,7 +405,7 @@ let G;
 function freshState() {
   return {
     phase: 'start', t: 0, s: PAD_A, lat: 0, y: PAD_TOP + 1.7, vLat: 0, vY: 0, speed: 0, boost: 0,
-    cargo: 0, health: 100, air: 60, score: 0, dive: false, underwater: false, hitCd: 0, rad: 0, bedHits: 0, bedScrapes: 0, bedT: -9,
+    cargo: 0, load: 0, health: 100, air: 10, jetLock: false, overheats: 0, heatHinted: false, dives: 0, wasUnder: false, score: 0, dive: false, underwater: false, hitCd: 0, rad: 0, bedHits: 0, bedScrapes: 0, bedT: -9,
     yaw: 0, pitch: 0, roll: 0, phaseT: 0, fireCd: 0, gun: 0, shake: 0, hitFlash: 0,
     kills: 0, mastsBroken: 0, outcome: null, reason: '', finalScore: 0, wasUnder: false, lastZone: null,
     msgT: 0, popT: 0, beepT: 0, airOut: false, toastT: 0, toastQ: [], seen: {}, rkLog: [], turretHinted: false, legendT: 20,
@@ -607,10 +611,20 @@ function fail(key) {
 // ------------------------------------------------------------------ flight (air handling unchanged; round 14 drag applies only once submerged)
 const SHIP_R = 3.2;
 // Submerged cruise is about a third of air cruise (62). The dive plunge, still in air, keeps its 34 m/s target and lat 15.
-const UW_FWD = 20, UW_DRAG = 2.6, UW_LAT = 11, UW_LAT_K = 3;
+const UW_FWD = 17, UW_DRAG = 2.6, UW_LAT = 11, UW_LAT_K = 3;   // round 27: submerged cruise 20 -> 17 m/s
+// round 27: water weight. Air cruise and turning lerp with the (smoothed) tank fraction: an empty Cormorant is the
+// quickest, a full one ~17 % slower and a bit heavier in turns, but always far faster than submerged (UW_FWD).
+// Boost still adds AIR_BOOST on top (and still burns water).
+const AIR_EMPTY = 64, AIR_FULL = 53, AIR_BOOST = 32, LAT_EMPTY = 30, LAT_FULL = 26, LATK_EMPTY = 5, LATK_FULL = 4.2, LOAD_EASE = 1.2;
+const airCruise = (k) => AIR_EMPTY + (AIR_FULL - AIR_EMPTY) * k;
+// round 27: HYDROJET heat. Underwater the hydrojet runs hot: AIR_MAX s of dive time (bar = what is left), then it
+// overheats -> automatic surfacing (no damage) and the jet stays locked until it has cooled back to AIR_LOCK s
+// (≈ (AIR_LOCK) / AIR_COOL s on the surface). G.air keeps its old name (it was the round-2 air supply).
+const AIR_MAX = 10, AIR_COOL = 2, AIR_LOCK = 6;
 function toggleDive() {
   if (G.phase !== 'flight') return;
-  if (!G.dive && G.air < 3) { showMsg(tx('msg.noAir'), 1.2, '#7ff'); return; }
+  if (!G.dive && !isWet(G.s)) { showMsg(tx('msg.dryBed'), 1.4, '#e8c9a0'); return; }   // round 27: no water here
+  if (!G.dive && (G.jetLock || G.air < 1)) { showMsg(tx('msg.noAir'), 1.2, '#7ff'); return; }
   G.dive = !G.dive;
   audio.dive();
 }
@@ -632,6 +646,7 @@ function autopilot(dt) {
   let gT = null, gLat = null;
   if (!GATE.passed && GATE_S - G.s < 560) {
     if (GATE.state === 'armed') { gT = GATE.ants.find((c) => c.alive); if (gT) { ty = 34; gLat = gT.lat; } }
+    else if (GATE.state === 'open' && APSLOP && GATE.breachT > BREACH_DUR - 0.9 * APSLOP) { ty = 34; gLat = GATE.ants[2].lat; }   // round 27: slow to react
     else { ty = GATE.state === 'open' ? 9 : 16; gLat = 0; }
   }
   let best = G.lat, bestC = 1e9;
@@ -664,12 +679,12 @@ function autopilot(dt) {
   if (gLat !== null) best = clamp(gLat, -wr * 0.75, wr * 0.75);
   // evade a LETHE lock by diving (the canon escape)
   G.apDiveT = Math.max(0, G.apDiveT - dt);
-  if (G.lock.phase === 'laser' && G.air > 12) G.apDiveT = 2.6;
+  if (G.lock.phase === 'laser' && G.air > 4 && !G.jetLock) G.apDiveT = 2.6;
   // round 26: water runs — dive to fill the tank on the open river (until the dive's intake share is in), then surface
-  if (G.apWater) { if (G.intakeFull || G.cargo >= 99.5 || G.air < 18 || G.s > GATE_S - 600) G.apWater = false; }
-  else if (G.cargo < 92 && G.air > 50 && G.surfT > SURF_RESET + 0.3 && G.s > 400 && G.s < GATE_S - 700) G.apWater = true;
-  const wantDive = needDive || G.apDiveT > 0 || G.apWater;
-  input.x = clamp((best - G.lat) * 0.12 - G.vLat * 0.04, -1, 1);
+  if (G.apWater) { if (G.intakeFull || G.cargo >= 99.5 || G.air < (APSLOP ? 0.5 : 2) || G.jetLock || G.s > GATE_S - 600) G.apWater = false; }
+  else if (G.cargo < 92 && G.air > AIR_MAX - 0.3 && !G.jetLock && G.surfT > SURF_RESET + 0.3 && isWet(G.s - 30) && G.s < GATE_S - 700 && (!APDIVES || G.apFills < APDIVES)) { G.apWater = true; G.apFills = (G.apFills || 0) + 1; }
+  const wantDive = (needDive || G.apDiveT > 0 || G.apWater) && !G.jetLock && isWet(G.s + 20) && (G.dive || G.air > 1.5);
+  input.x = clamp((best - G.lat) * 0.12 - G.vLat * 0.04 + (APSLOP && gLat === null ? APSLOP * 0.55 * Math.sin(G.t * 0.83) * Math.sin(G.t * 0.31 + 1) : 0), -1, 1);
   input.y = clamp((ty - G.y) * 0.2 - G.vY * 0.05, -1, 1);
   if (wantDive !== G.dive && G.phase === 'flight') toggleDive();
   if (G.dive && G.y < -1) input.y = clamp((-5 - G.y) * 0.3, -1, 1);
@@ -706,7 +721,7 @@ function updateFlight(dt) {
     if (rem <= 0.6) { G.s = PAD_B; G.speed = 0; }
     if (rem < 1.2 && Math.abs(G.y - (PAD_TOP + 1.7)) < 0.25 && G.phaseT > 1) {
       G.phase = 'landed'; G.phaseT = 0; G.outcome = 'delivered';
-      if (G.cargo < DELIVER_MIN) showMsg(tx('msg.touchdownLow'), 3, '#ff9a80'); else showMsg(tx('msg.touchdown'), 3, '#9ff2d8');
+      if (Math.round(G.cargo) < DELIVER_MIN) showMsg(tx('msg.touchdownLow'), 3, '#ff9a80'); else showMsg(tx('msg.touchdown'), 3, '#9ff2d8');
     }
   } else if (G.phase === 'landed') {
     G.speed = 0; G.vLat = 0; G.vY = 0; G.y += (PAD_TOP + 1.7 - G.y) * damp(4, dt);
@@ -721,10 +736,13 @@ function updateFlight(dt) {
     // round 15: a boat scan lock damps only that air cruise. Dive entry and submerged handling are untouched.
     const submerged = G.underwater;
     const scanK = (!submerged && !G.dive) ? G.scan : 0;
-    const target = submerged ? UW_FWD : (G.dive ? 34 : 62 + 32 * G.boost);
+    // round 27: water weight (G.load eases toward the tank fraction, so a spill or a fill never jerks the speed)
+    G.load += (clamp(G.cargo / 100, 0, 1) - G.load) * damp(LOAD_EASE, dt);
+    const L = G.load;
+    const target = submerged ? UW_FWD : (G.dive ? 34 : airCruise(L) + AIR_BOOST * G.boost);
     let spdK = submerged ? UW_DRAG : (boosting ? 1.3 : 0.9);
-    let latMax = submerged ? UW_LAT : (G.dive ? 15 : 30);
-    let latK = submerged ? UW_LAT_K : 5;
+    let latMax = submerged ? UW_LAT : (G.dive ? 15 : LAT_EMPTY + (LAT_FULL - LAT_EMPTY) * L);
+    let latK = submerged ? UW_LAT_K : LATK_EMPTY + (LATK_FULL - LATK_EMPTY) * L;
     let aimSpd = target;
     if (scanK > 0) {
       aimSpd = target + (G.scanCap - target) * scanK;
@@ -743,6 +761,9 @@ function updateFlight(dt) {
       // ship back out to ~GATE_HOLD m, so the antennas are never left directly overhead with no aim angle
       if (room < -2) { G.retreatV = clamp(-room * 0.9, 4, 28); G.speed = Math.min(G.speed, 0); aimSpd = 0; }
     }
+    // round 27: the breach is only open BREACH_DUR s, so while the ship is still up at antenna height the field's drag
+    // keeps the approach slow (BREACH_SLOW m/s) — a late reaction is not punished by sliding into the curtain above the notch
+    if (GATE.up && !GATE.passed && GATE.state === 'open' && G.s > GATE_S - 260 && G.s < GATE_S && G.y > BREACH_TOP - 3) aimSpd = Math.min(aimSpd, BREACH_SLOW);
     G.speed += (aimSpd - G.speed) * damp(spdK, dt);
     G.vLat += (ix * latMax - G.vLat) * damp(latK, dt);
     let vYt;
@@ -1190,7 +1211,8 @@ function boltWorldHit(b) {
   const y = b.p.y;
   const side = pr.lat > 0 ? 1 : -1;
   if (side * pr.lat > wallLat(b.s, y, side)) { surfaceHit(b.p); return true; }
-  if (y < 0) { splash(b.p, 10, 0.5); sparks.emit(b.p.x, 0.3, b.p.z, 0, 0, 0, 0.15, 3, 5, 0.9, 1.4, 1.4, 1); return true; }
+  if (!isWet(b.s)) { if (y < bedY(b.s, pr.lat) + 0.2) { surfaceHit(b.p); return true; } }   // round 27: dry bed
+  else if (y < 0) { splash(b.p, 10, 0.5); sparks.emit(b.p.x, 0.3, b.p.z, 0, 0, 0, 0.15, 3, 5, 0.9, 1.4, 1.4, 1); return true; }
   for (const r of ROCKS) if (Math.abs(r.s - b.s) < r.r + 2 && y < r.h && Math.abs(r.lat - pr.lat) < r.r) { surfaceHit(b.p); return true; }
   for (const a of ARCHES) if (Math.abs(a.s - b.s) < a.ht && y > archBottom(a, pr.lat) && y < archTop(a, pr.lat)) { surfaceHit(b.p); return true; }
   return false;
@@ -2582,7 +2604,8 @@ function hint(kind) {
 // ANT_REBOOT s and the attempt starts over (no hard fail). The field holds the ship in a hover arena ~GATE_HOLD m in
 // front of it while the breach is shut; touching the curtain anywhere outside an open breach drains half the tank.
 const gateObj = buildGate(scene, FOG_D_AIR);
-const BREACH_DUR = 8, ANT_REBOOT = 5, FIELD_DRAIN = 0.5, FIELD_CD = 1.6, FIELD_KNOCK = 40;
+const BREACH_DUR = 4, ANT_REBOOT = 5, FIELD_DRAIN = 0.5, FIELD_CD = 1.6, FIELD_KNOCK = 40;
+const BREACH_SLOW = 24;   // round 27: m/s approach cap above the notch while the breach is open (see updateFlight)
 const GATE_GUN_CD = [1.5, 2.3], GATE_GUN_DMG = 7;
 const GATE = { up: true, state: 'armed', breachT: 0, rebootT: 0, open: 0, passed: false, said: false, hold: false, bumpCd: 0, hitK: 0,
   attempts: 0, ants: [], guns: [] };
@@ -2829,7 +2852,7 @@ function respawn() {
   endTutorial(); endIntro();
   G.phase = 'flight'; G.phaseT = 0; G.outcome = null; G.reason = ''; G.reasonKey = null; G.respawn = false;
   G.s = c; G.lat = 0; G.y = 12; G.vY = 0; G.vLat = 0; G.speed = 45; G.boost = 0;
-  G.dive = false; G.underwater = false; G.wasUnder = false; G.air = 60; G.airOut = false; G.dip = 0; G.apDiveT = 0;
+  G.dive = false; G.underwater = false; G.wasUnder = false; G.air = AIR_MAX; G.airOut = false; G.jetLock = false; G.dip = 0; G.apDiveT = 0;
   G.yaw = 0; G.pitch = 0; G.roll = 0; G.hitCd = 0; G.rad = 0; G.bedHits = 0; G.bedScrapes = 0;
   G.cargo = snap.cargo; G.diveGain = 0; G.surfT = 9; G.knockV = 0; G.health = Math.max(snap.health, 60); G.shield = Math.max(snap.shield, SHIELD_MAX * 0.5); G.rockets = Math.max(snap.rockets, 2);
   disp.cargo = disp.gc = G.cargo;
@@ -3030,22 +3053,30 @@ function updateTargets(dt, time) {
 // ------------------------------------------------------------------ hazards
 function updateHazards(dt) {
   const flying = G.phase === 'flight' || G.phase === 'landing';
-  G.underwater = G.y < -0.6;
+  G.underwater = G.y < -0.6 && isWet(G.s);   // round 27: no water outside the wet stretch
+  if (G.underwater && !G.wasUnder) G.dives++;
+  G.wasUnder = G.underwater;
   if (flying) {
+    if (G.dive && !isWet(G.s)) G.dive = false;   // e.g. slipping under the breach at depth: surface over the dry bed
     if (G.underwater) {
       G.air = Math.max(0, G.air - dt);
-      if (G.air < 15) {
+      if (G.air < 3) {
         G.beepT -= dt;
-        if (G.beepT <= 0) { audio.beep(G.air < 6 ? 1100 : 880); G.beepT = G.air < 6 ? 0.45 : 1; }
+        if (G.beepT <= 0) { audio.beep(G.air < 1.5 ? 1100 : 880); G.beepT = G.air < 1.5 ? 0.3 : 0.6; }
       }
       if (G.air <= 0) {
-        if (!G.airOut) { G.airOut = true; showMsg(tx('msg.airOut'), 2, '#7ff'); }
+        // round 27: hydrojet overheat -> automatic surfacing + cool-down lock (no damage)
+        if (!G.airOut) {
+          G.airOut = true; G.jetLock = true; G.overheats++;
+          showMsg(tx('msg.airOut'), 2.2, '#ffb070');
+          if (!G.heatHinted) { G.heatHinted = true; toast(tx('toast.overheat'), 5, true); }
+        }
         G.dive = false;
-        G.health -= 8 * dt;
       }
     } else {
-      G.air = Math.min(60, G.air + 14 * dt);
+      G.air = Math.min(AIR_MAX, G.air + AIR_COOL * dt);
       G.airOut = false;
+      if (G.jetLock && G.air >= AIR_LOCK) { G.jetLock = false; showMsg(tx('msg.jetReady'), 1.4, '#8fe9dc'); }
     }
     const z = zoneAt(G.s);
     const exposed = !!(z && !z.shielded);
@@ -3094,7 +3125,7 @@ function updateHazards(dt) {
 // round 26: the tank fills only while the hull is submerged (the hydrojet intake doubles as the water scoop).
 // FILL_RATE %/s into an empty tank, slowing linearly to (1 - FILL_SLOW) of that when full. One dive takes at most
 // DIVE_CAP % — the intake filter clogs; staying on the surface ≥ SURF_RESET s flushes it for the next dive.
-const FILL_RATE = 3.0, FILL_SLOW = 0.5, DIVE_CAP = 35, SURF_RESET = 4;
+const FILL_RATE = 3.5, FILL_SLOW = 0.5, DIVE_CAP = 35, SURF_RESET = 4;   // round 27: 3.0 -> 3.5 (a 10 s dive ≈ 32 % from empty)
 function waterTick(d) {
   const el = hud.tankTick;
   if (!el) return;
@@ -3234,7 +3265,8 @@ function updateShipVisual(dt, time) {
     glows.add(nozW.x, nozW.y, nozW.z, i ? 0.3 : 2, i ? 2 : 0.3, 0.3, on ? 1 : 0.15, 1.4);
   }
   // spray / wake when skimming low over the water
-  const skim = !G.underwater && G.y < 5 && running ? (1 - G.y / 5) * Math.min(G.speed / 60, 1.4) : 0;
+  const wetHere = isWet(G.s);   // round 27: no spray / wake over the dry bed
+  const skim = wetHere && !G.underwater && G.y < 5 && running ? (1 - G.y / 5) * Math.min(G.speed / 60, 1.4) : 0;
   G.skim = skim;
   if (skim > 0.05) {
     const n = Math.ceil(skim * (7 + G.boost * (quality === 'high' ? 6 : 2)));
@@ -3249,7 +3281,7 @@ function updateShipVisual(dt, time) {
     if (Math.random() < skim) mist.emit(shipPos.x - SF.tx * 9, 0.6, shipPos.z - SF.tz * 9, (Math.random() - 0.5) * 3, 3 + Math.random() * 5, (Math.random() - 0.5) * 3,
       1.5, 2, 8, 0.85, 0.94, 0.93, 0.35 * skim, 2, 1);
   }
-  const wk = running && !G.underwater ? clamp((7 - G.y) / 6, 0, 1) * Math.min(1, G.speed / 40) : 0;
+  const wk = wetHere && running && !G.underwater ? clamp((7 - G.y) / 6, 0, 1) * Math.min(1, G.speed / 40) : 0;
   wake.update(dt, shipPos.x, shipPos.z, SF.rx, SF.rz, wk);
   wake.mat.uniforms.uTime.value = time;
   if (G.underwater && Math.random() < 0.5) {
@@ -3369,7 +3401,7 @@ function updateCamera(dt, time) {
   if (Math.abs(camera.fov - fovCur) > 0.05) { camera.fov = fovCur; camera.updateProjectionMatrix(); }
 
   // underwater look (codex-style teal fog, shorter distance)
-  const cu = camera.position.y < 0;
+  const cu = camera.position.y < 0 && isWet(G.s - 8);   // round 27: no water over the dry bed
   if (cu !== camUnder) {
     camUnder = cu;
     scene.fog.color.copy(cu ? FOG_WATER : FOG_AIR);
@@ -3608,10 +3640,12 @@ function tweenTo(k, gk, target, dt) {
 function updateHUD(dt, time) {
   tweenTo('cargo', 'gc', G.cargo, dt); tweenTo('shield', 'gs', G.shield, dt); tweenTo('health', 'gh', Math.max(0, G.health), dt);
   setBar(hud.bCargo, disp.cargo / 100, disp.gc / 100);
+  // round 27: forward speed next to the tank (the water weight is felt here: full tank = slower cruise)
+  if (hud.tSpd) { const v = Math.round(G.speed); if (v !== hud.spdV) { hud.spdV = v; hud.tSpd.textContent = `${v}\u00a0${tx('unit.ms')}`; } }
   setBar(hud.bShield, disp.shield / 100, disp.gs / 100);
   setBar(hud.bHealth, disp.health / 100, disp.gh / 100);
   setBar(hud.bRad, G.rad);
-  setBar(hud.bAir, G.air / 60);
+  setBar(hud.bAir, G.air / AIR_MAX);
   setBar(hud.bMark, G.mark);
   hud.rowShield.classList.toggle('regen', G.regen);
   // round 6: water-burn tag under the tank gauge (steam-white, not an alarm) + shimmer on the bar.
@@ -3650,8 +3684,8 @@ function updateHUD(dt, time) {
     hud.markLbl.textContent = tx(noRelay ? 'hud.noRelay' : 'hud.mark');
   }
   hud.tintLock.style.opacity = locked ? 0.6 + 0.4 * Math.sin(time * 20) : G.mark * (noRelay ? 0.08 : 0.35);
-  hud.airBox.style.opacity = G.underwater || G.air < 59.5 ? 1 : 0;
-  hud.airBox.classList.toggle('low', G.air < 15);
+  hud.airBox.style.opacity = G.underwater || G.air < AIR_MAX - 0.05 ? 1 : 0;
+  hud.airBox.classList.toggle('low', G.air < 3 || G.jetLock);
   hud.routeShip.style.left = clamp((G.s - PAD_A) / ROUTE, 0, 1) * 100 + '%';
   hud.tintRad.style.opacity = G.rad > 0.01 ? G.rad * (0.75 + 0.25 * Math.random()) : 0;
   G.hitFlash = Math.max(0, G.hitFlash - dt * 2.5);
@@ -3714,15 +3748,17 @@ const litres = (pct) => Math.round(pct / 100 * TANK_L / 10) * 10;
 const fmtL = (l) => String(l).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009') + '\u00a0' + tx('unit.l');
 // round 25: the language-dependent part of the result screen (re-run on a language switch)
 // round 26: WATER DELIVERED is the headline. Landing with less than DELIVER_MIN % is a failed delivery ('short').
-const DELIVER_MIN = 10, WATER_PTS = 40;   // score: +40 per delivered % (4 000 for a full tank)
+const DELIVER_MIN = 75, WATER_PTS = 40;   // round 27: success needs >= 75 % of the tank (was 10)
+   // score: +40 per delivered % (4 000 for a full tank)
 function resultText() {
   const ok = G.outcome === 'delivered', short = G.outcome === 'short';
   set('rTitle', tx(ok ? 'res.ok' : short ? 'res.short' : 'res.fail'));
   const rt = $('rTitle'); if (rt) { rt.className = ok ? '' : 'bad'; delete rt.dataset.i18n; }
-  set('rSub', ok ? tx('res.okSub') : short ? tx('res.shortSub') : (G.reasonKey ? tx(G.reasonKey) : G.reason));
+  set('rSub', ok ? tx('res.okSub') : short ? tx('res.shortSub', { pct: Math.round(G.cargo), need: DELIVER_MIN }) : (G.reasonKey ? tx(G.reasonKey) : G.reason));
   const deliv = ok || short ? G.cargo : 0;
   set('rGate', G.gateT != null ? tx('st.gateBreached') : `${GATE.ants.filter((a) => !a.alive).length} / ${GATE.ants.length}`);
   set('rWater', `${fmtL(litres(deliv))} · ${Math.round(deliv)}%`);
+  set('rNeed', tx('res.need', { need: DELIVER_MIN }));   // round 27
   set('rCollected', `${fmtL(litres(G.waterGained))}`);
   set('rSpilled', `${fmtL(litres(G.waterSpilled))}`);
   set('rBurned', `${fmtL(litres(G.waterBurned))}`);
@@ -3730,7 +3766,7 @@ function resultText() {
 }
 function showResult() {
   G.phase = 'result';
-  if (G.outcome === 'delivered' && G.cargo < DELIVER_MIN) G.outcome = 'short';
+  if (G.outcome === 'delivered' && Math.round(G.cargo) < DELIVER_MIN) G.outcome = 'short';
   const ok = G.outcome === 'delivered';
   const timeBonus = ok ? Math.max(0, Math.round((200 - G.t) * 15)) : 0;
   G.waterBonus = ok ? Math.round(G.cargo * WATER_PTS) : 0;
@@ -3929,6 +3965,7 @@ if (langPick) {
   for (const ev of ['click', 'pointerdown', 'keydown']) $('langBox').addEventListener(ev, (e) => e.stopPropagation());
 }
 onLang((code) => {
+  hud.spdV = -1;   // round 27: re-print the speed unit
   if (langPick) langPick.value = code;
   const q = $('qual'); if (q) q.textContent = tx('hud.quality', { q: quality.toUpperCase() });
   syncEngine();
@@ -4050,7 +4087,7 @@ function updateTorpCue(rdt) {
 }
 // round 12: the autopilot dives under a boat close ahead (as the tutorial teaches) through its existing dive timer
 function apBoatDive() {
-  if (G.air < 14) return;
+  if (G.air < 4 || G.jetLock) return;
   if (G.scanPhase === 'catch' || G.scanPhase === 'lock') { G.apDiveT = Math.max(G.apDiveT, 2.4); return; }
   for (const b of BOATS) if (b.alive && b.s - G.s > -25 && b.s - G.s < 240 && Math.abs(b.lat - G.lat) < 55) { G.apDiveT = Math.max(G.apDiveT, 1.8); return; }
   for (const b of BOATS) if (b.pun === 'tele') { G.apDiveT = Math.max(G.apDiveT, 1.4); return; }
@@ -4277,10 +4314,12 @@ function loop(now) {
   const s0 = sv - 320, s1 = sv + VIEW_AHEAD[quality];
   for (const c of chunks) c.visible = c.userData.sB > s0 && c.userData.sA < s1;
   for (const w of waters) w.visible = w.userData.sB > s0 && w.userData.sA < s1;
+  for (const w of dryBed.meshes) w.visible = w.userData.sB > s0 && w.userData.sA < s1;
   for (const z of ZONES) if (z.mesh && z.shielded) z.mesh.visible = z.s1 > s0 && z.s0 < s1;
   gateObj.group.visible = GATE_S > s0 && GATE_S < s1;
 
   for (const m of FALLS) m.material.uniforms.uTime.value = time;
+  dryBed.faceMat.uniforms.uTime.value = time;
   waterMat.uniforms.uTime.value = time;
   foam.material.uniforms.uTime.value = time;
   shafts.material.uniforms.uTime.value = time;
@@ -4394,9 +4433,9 @@ window.__lethe = {
     kill: () => fail('fail.debug'),
     // round 25: jump straight to the result screen (stats layout / i18n checks); ok=false shows the failure variant
     // ok = true | false | 'short' (failed delivery: lands with < DELIVER_MIN %)
-    showResult: (ok = true) => { G.outcome = ok === 'short' ? 'delivered' : ok ? 'delivered' : 'failed'; if (ok === 'short') G.cargo = Math.min(G.cargo, 6); else if (ok && G.cargo < DELIVER_MIN) G.cargo = 72; if (!ok) { G.reasonKey = 'fail.hull'; G.reason = tx('fail.hull'); } showResult(); return G.phase; },
+    showResult: (ok = true) => { G.outcome = ok === 'short' ? 'delivered' : ok ? 'delivered' : 'failed'; if (ok === 'short') G.cargo = Math.min(G.cargo, 6); else if (ok && G.cargo < DELIVER_MIN) G.cargo = 88; if (!ok) { G.reasonKey = 'fail.hull'; G.reason = tx('fail.hull'); } showResult(); return G.phase; },
     // round 26 water / gate hooks
-    tank: () => ({ cargo: +G.cargo.toFixed(2), filling: G.filling, fillRate: +(G.fillRate || 0).toFixed(2), diveGain: +G.diveGain.toFixed(2), intakeFull: G.intakeFull,
+    tank: () => ({ air: +G.air.toFixed(2), jetLock: G.jetLock, overheats: G.overheats, dives: G.dives, dive: G.dive, underwater: G.underwater, msg: hud.msg ? hud.msg.textContent : '', load: +G.load.toFixed(3), speed: +G.speed.toFixed(1), cargo: +G.cargo.toFixed(2), filling: G.filling, fillRate: +(G.fillRate || 0).toFixed(2), diveGain: +G.diveGain.toFixed(2), intakeFull: G.intakeFull,
       gained: +G.waterGained.toFixed(2), spilled: +G.waterSpilled.toFixed(2), hitLoss: +G.waterHitLoss.toFixed(2), fieldDrained: +G.fieldDrained.toFixed(2), burned: +G.waterBurned.toFixed(2),
       fieldTouches: G.fieldTouches, bedScrapes: G.bedScrapes, bedSpilled: +(G.bedSpilled || 0).toFixed(2), health: +G.health.toFixed(1), shield: +G.shield.toFixed(1) }),
     hit: (n = 10) => damage(n, null, 'debug'),
@@ -4546,7 +4585,9 @@ window.__lethe = {
       return { n, cyan, laser, laserRGB, markPings: G.markPings, spotters: G.spotters, underwater: G.underwater, camUnder, lock: G.lock.phase, mark: +G.mark.toFixed(3), frozen };
     },
     shipCam: () => ({ ship: shipPos.toArray(), cam: camera.position.toArray() }),
-    refill: () => { G.air = 60; G.airOut = false; G.cargo = 100; G.health = 100; G.shield = SHIELD_MAX; disp.cargo = disp.gc = 100; },
+    toggleDive: () => toggleDive(),
+    setAir: (v) => { G.air = v; G.jetLock = false; G.airOut = false; },
+    refill: () => { G.air = AIR_MAX; G.airOut = false; G.jetLock = false; G.cargo = 100; G.health = 100; G.shield = SHIELD_MAX; disp.cargo = disp.gc = 100; },
     hullFloor: (s, lat) => +hullFloor(s, lat).toFixed(2),   // round 26: lowest allowed ship y over the bed
     // round 23: hull / camera clearance to the riverbed (m; negative = inside rock)
     bedProbe: () => {

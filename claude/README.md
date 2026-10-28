@@ -606,9 +606,9 @@ pilots dive when a missile is already locked. Round 1 drones were just score tar
 ## Rules (unchanged mechanics)
 - **Tank / ЦИСТЕРНА** (round 26): starts empty, fills only underwater. Wall, rock-column and arch hits bounce/slow the
   ship; damage goes to the shield first, then the hull (**HEALTH**; 0 = crash → checkpoint respawn). Every hit also
-  spills some water (see Round 26). An empty tank never ends the run — landing with < 10 % is a failed delivery.
+  spills some water (see Round 26). An empty tank never ends the run — landing with < 75 % (round 27, `DELIVER_MIN`) is a failed delivery.
 - **Dive / НЫРОК**: wings sweep back, canopy armour closes, engines turn cold turquoise, teal fog, muffled audio, bubbles,
-  slower speed. **Air / ВОЗДУХ** ≈ 60 s; refills on the surface. Splashes on entry/exit and spray/wake when skimming.
+  slower speed. **Hydrojet / ГИДРОМОТОР** heat (round 27): 10 s per dive, then overheat → auto-surface + ~3 s cool-down (no damage). Splashes on entry/exit and spray/wake when skimming.
 - **Force-field masts**: hit one → −300, its section's field flickers and collapses; inside an unshielded section the
   screen tints red, geiger crackle, **RAD** meter, **Health** drains ~5.5 %/s (−50 % while the shield holds; diving
   blocks ~90 %). Health 0 = fail.

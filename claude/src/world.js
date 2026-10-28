@@ -1,7 +1,7 @@
 // Canyon spline, cross-section profile functions and procedural level layout.
 // Everything is expressed in "path space": s = distance along the canyon,
 // lat = lateral offset (right positive), y = height above river surface.
-import { clamp, lerp, smoothstep, noise1, noise2, fbm2, rng } from './util.js?v=r26';
+import { clamp, lerp, smoothstep, noise1, noise2, fbm2, rng } from './util.js?v=r27';
 
 export const S0 = -400;          // terrain starts here
 export const S_END = 8750;       // terrain ends here
@@ -173,6 +173,11 @@ export const WRECK = { s: 2960, side: -1 };
 // Round 16 finale: the LETHE gate spans the canyon ~0.5 km before settlement B. Its approach is kept clear of rock columns
 // (the ship hovers in front of it while the generators are up).
 export const GATE_S = PAD_B - 540, GATE_HOLD = 70, GATE_BEAM = 46;
+// round 27: where the river actually has water. Upstream of RIVER_A the old main bed is dry (the river enters the
+// canyon from a side cascade just past the colonists' weir at RIVER_A); downstream of the LETHE gate the bed is dry
+// too — the barrier holds the river back. Pad A (start) and pad B (Typhonia, landing) both stand on the dry bed.
+export const RIVER_A = 430;
+export const isWet = (s) => s > RIVER_A && s < GATE_S;
 for (let i = ROCKS.length - 1; i >= 0; i--) if (ROCKS[i].s > GATE_S - 150 && ROCKS[i].s < GATE_S + 40) ROCKS.splice(i, 1);
 
 // Round 18: checkpoints along the canyon (the start counts as checkpoint 0). Chosen clear of arches, just past the
@@ -302,7 +307,8 @@ export const underLim = (s) => riverHalf(s) * 0.8 - 3;
 // [s0, s1, count]; a staggered slalom across the river, mixed depths (≈ 1/3 just under the surface: they threaten
 // skimming too).
 export const MINES = [];
-const MINE_FIELDS = [[1375, 1525, 6], [2140, 2290, 5], [3385, 3545, 7], [4360, 4500, 5], [5545, 5700, 8], [7140, 7290, 5]];
+// round 27: +9 mines (36 -> 45): one more in each field, plus a small open-river field after checkpoint 4 (4950)
+const MINE_FIELDS = [[1375, 1525, 7], [2140, 2290, 6], [3385, 3545, 8], [4360, 4500, 6], [5010, 5130, 3], [5545, 5700, 9], [7140, 7290, 6]];
 const R2 = rng(4404);
 const r2 = (a, b) => a + (b - a) * R2();
 for (const [s0, s1, n] of MINE_FIELDS) {

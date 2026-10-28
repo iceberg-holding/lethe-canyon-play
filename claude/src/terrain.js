@@ -1,12 +1,12 @@
 // Builds the canyon chunks (walls, riverbed, rocks, arches, settlements, set dressing), river
 // surface, foam, light shafts, force-field vaults and the sky. Everything static is merged per chunk.
 import * as THREE from 'three';
-import { clamp, lerp, smoothstep, noise1, noise2, hash2, rng, sanitizeNormals } from './util.js?v=r26';
+import { clamp, lerp, smoothstep, noise1, noise2, hash2, rng, sanitizeNormals } from './util.js?v=r27';
 import {
   S0, S_END, PAD_A, PAD_B, PAD_TOP, frame, toWorld, wallLat, riverHalf, rimH, basinF, bankY,
-  ARCHES, ROCKS, ZONES, BEACONS, MASTS, TURRETS, DRESS, WRECK, TRIBS, archBottom, archTop,
-} from './world.js?v=r26';
-import { rockTextures, colonialTextures } from './textures.js?v=r26';
+  ARCHES, ROCKS, ZONES, BEACONS, MASTS, TURRETS, DRESS, WRECK, TRIBS, archBottom, archTop, RIVER_A, GATE_S, isWet,
+} from './world.js?v=r27';
+import { rockTextures, colonialTextures } from './textures.js?v=r27';
 
 const SEC = 6;              // metres between cross sections
 const CH_SEC = 40;          // sections per chunk (240 m)
@@ -118,7 +118,7 @@ function sideProfile(s, side, out) {
     const dam = side === -1 ? smoothstep(4370, 4410, s) * (1 - smoothstep(4560, 4610, s)) : 0;
     const alcove = garden * smoothstep(20, 25, y) * (1 - smoothstep(65, 72, y)) * 26
       + dam * smoothstep(28, 34, y) * (1 - smoothstep(96, 104, y)) * 26;
-    const cascade = side === 1 ? Math.max(...[1850, 7080].map(c => (1 - smoothstep(4, 14, Math.abs(s - c))))) *
+    const cascade = side === 1 ? Math.max(...[HEAD_FALL, 1850, 7080].map(c => (1 - smoothstep(4, 14, Math.abs(s - c))))) *
       smoothstep(1, 4, y) * (1 - smoothstep(60, 68, y)) * 8 : 0;
     const l = wallLat(s, y, side) + recess + alcove + cascade;
     out.push([l, y]);
@@ -279,7 +279,9 @@ function addSettlement(P, E, sPad, sMin, sMax, which) {
   const R = rng(which === 'A' ? 11 : 22);
   const metal = [0.42, 0.42, 0.43], pale = [0.86, 0.84, 0.8], dark = [0.2, 0.2, 0.22];
   if (sPad >= sMin && sPad < sMax) {
-    place(P, GEO.cyl, sPad, 0, PAD_TOP / 2 - 2, 13, PAD_TOP + 4, 13, [0.32, 0.32, 0.33]);
+    // round 27: both pads stand on the dry bed, so the pylon reaches down to it (bed ≈ −11 m at the centre)
+    place(P, GEO.cyl, sPad, 0, (PAD_TOP - 11.6) / 2, 13, PAD_TOP + 11.6, 13, [0.32, 0.32, 0.33]);
+    place(P, GEO.cyl, sPad, 0, -10.6, 17, 1.2, 17, [0.36, 0.34, 0.32]);
     place(P, GEO.cyl, sPad, 0, PAD_TOP + 0.05, 10, 0.1, 10, which === 'A' ? [0.75, 0.55, 0.18] : [0.2, 0.55, 0.35]);
     place(P, GEO.cyl, sPad, 0, PAD_TOP + 0.12, 8.6, 0.1, 8.6, [0.26, 0.26, 0.27]);
     place(P, GEO.box, sPad, 0, PAD_TOP + 0.16, 1.2, 0.05, 9, pale);
@@ -294,7 +296,10 @@ function addSettlement(P, E, sPad, sMin, sMax, which) {
       glowAt(sPad + Math.cos(a) * 12.2, Math.sin(a) * 12.2, PAD_TOP + 0.4, padCol, 1.7, k * 0.09 + (which === 'B' ? 1 : 0));
     }
     // approach light row on the water
-    for (let k = 1; k < 9; k++) glowAt(sPad - 18 - k * 14, 0, 1.2, padCol, 2.2, 10 + k * 0.4);
+    for (let k = 1; k < 9; k++) {
+      glowAt(sPad - 18 - k * 14, 0, 1.2, padCol, 2.2, 10 + k * 0.4);
+      place(P, GEO.cyl8, sPad - 18 - k * 14, 0, -4.9, 0.35, 12.2, 0.35, dark);   // round 27: posts on the dry bed
+    }
   }
   for (let s = Math.ceil(sMin / 22) * 22; s < sMax; s += 22) {
     for (const side of [-1, 1]) {
@@ -587,10 +592,12 @@ function addColonial(P, E, C, G, sA, sB) {
 }
 
 export const FALLS = [];
+// round 27: the river enters the canyon as a side cascade just past the weir (the main bed above it is dry)
+const HEAD_FALL = RIVER_A + 32;
 function addFalls(grp, sA, sB) {
-  for (const s of [1850, 7080]) {
+  for (const s of [HEAD_FALL, 1850, 7080]) {
     if (s < sA || s >= sB) continue;
-    const B = new Builder(), rows = 24, cols = 9, width = s === 1850 ? 18 : 10, edges = [];
+    const B = new Builder(), rows = 24, cols = 9, width = s === 7080 ? 10 : s === HEAD_FALL ? 16 : 18, edges = [];
     // Sheets follow the wall column by column, flare slightly toward the foot and
     // bulge gently toward the river, always keeping clear of the analytic wall.
     for (let layer = 0; layer < 3; layer++) {
@@ -884,11 +891,14 @@ export function makeWaterMaterial(sunDir, sun2Dir, horizon, zenith) {
 export function buildWater(scene, mat) {
   const out = [];
   const step = 8, cols = 9;
-  for (let sA = S0; sA < S_END; sA += CHUNK_LEN) {
-    const sB = Math.min(sA + CHUNK_LEN, S_END);
+  for (let sA0 = S0; sA0 < S_END; sA0 += CHUNK_LEN) {
+    // round 27: water only between the weir (RIVER_A) and the LETHE curtain (GATE_S)
+    const sA = Math.max(sA0, RIVER_A), sB = Math.min(sA0 + CHUNK_LEN, S_END, GATE_S - 0.3);
+    if (sB - sA < 1) continue;
     const pos = [], uv = [], aw = [], ix = [];
     let rows = 0;
-    for (let s = sA; s <= sB + 0.01; s += step) {
+    for (let s0 = sA; s0 <= sB + step - 0.01; s0 += step) {
+      const s = Math.min(s0, sB);
       frame(s, F);
       const wr = riverHalf(s), W = wr + 9;
       for (let j = 0; j < cols; j++) {
@@ -1215,4 +1225,171 @@ export function makeSky(sun, sun2, hor, zen) {
   m.frustumCulled = false;
   m.renderOrder = -10;
   return m;
+}
+
+// --------------------------------------------------------------- round 27: dry riverbed, weir, held-back water face
+// The river only has water between the colonists' weir (RIVER_A) and the LETHE curtain (GATE_S). Outside that the
+// riverbed trench (same cross-section the terrain uses: 0 / −11 m centre, −10.5 @0.45 wr, −7 @0.8 wr, −2.5 @0.95 wr,
+// +0.4 @wr) is draped with a cracked, salt-crusted mud overlay; a few damp stains seep past the curtain and the weir.
+// At the curtain the held-back river stands as a vertical water face (bed → level 0) right behind the field.
+const BED_K = [[-1, 0.4], [-0.95, -2.5], [-0.8, -7], [-0.45, -10.5], [0, -11], [0.45, -10.5], [0.8, -7], [0.95, -2.5], [1, 0.4]];
+function bedKnots(wr, sub) {
+  const out = [];
+  for (let k = 0; k < BED_K.length - 1; k++) for (let j = 0; j < sub; j++) {
+    const t = j / sub, a = BED_K[k], b = BED_K[k + 1];
+    out.push([(a[0] + (b[0] - a[0]) * t) * wr, a[1] + (b[1] - a[1]) * t]);
+  }
+  out.push([wr, 0.4]);
+  return out;
+}
+export const bedYAt = (s, lat) => {
+  const wr = riverHalf(s), u = Math.abs(lat) / wr;
+  for (let k = 4; k < BED_K.length - 1; k++) {
+    const a = BED_K[k], b = BED_K[k + 1];
+    if (u <= b[0]) return a[1] + (b[1] - a[1]) * (u - a[0]) / (b[0] - a[0]);
+  }
+  return 0.4;
+};
+export function makeDryMaterial() {
+  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+  mat.userData.uniforms = { uGate: { value: GATE_S }, uWeir: { value: RIVER_A } };
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, mat.userData.uniforms);
+    sh.vertexShader = 'attribute vec3 aPath;\nvarying vec3 vPath;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vPath = aPath;');
+    sh.fragmentShader = `varying vec3 vPath; uniform float uGate; uniform float uWeir;
+float dh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+vec2 dh2(vec2 p){ return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
+float dn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  return mix(mix(dh(i), dh(i+vec2(1,0)), f.x), mix(dh(i+vec2(0,1)), dh(i+vec2(1,1)), f.x), f.y); }
+// Voronoi: x = distance to the nearest cell border (crack), y = cell id hash
+vec2 crack(vec2 p){
+  vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0; vec2 id = vec2(0.0);
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 g = vec2(float(x), float(y)), o = dh2(i + g), r = g + o - f; float d = dot(r, r);
+    if (d < d1) { d2 = d1; d1 = d; id = i + g; } else if (d < d2) d2 = d;
+  }
+  return vec2(sqrt(d2) - sqrt(d1), dh(id));
+}
+` + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  {
+    vec2 p = vPath.xy;                 // x = lateral metres, y = metres along the canyon
+    float u = vPath.z;                 // 0 at the bed centre, 1 at the bank lip
+    float n = dn(p * vec2(0.09, 0.05)), n2 = dn(p * 0.6 + 7.0);
+    vec2 c1 = crack(p * vec2(0.42, 0.36)), c2 = crack(p * 1.35 + 3.0);
+    vec3 mud = mix(vec3(0.58, 0.45, 0.35), vec3(0.70, 0.57, 0.45), c1.y * 0.6 + n * 0.4);
+    mud *= 0.92 + 0.12 * n2;
+    // pale salt / perchlorate crust on the flats, thinning up the slopes
+    float salt = smoothstep(0.55, 0.85, dn(p * vec2(0.16, 0.11) + 11.0)) * (1.0 - smoothstep(0.45, 0.9, u));
+    mud = mix(mud, vec3(0.88, 0.85, 0.78), salt * 0.55);
+    // plate cracks (bigger on the flats) + a fine craquelure
+    float cw = mix(0.075, 0.035, smoothstep(0.3, 0.9, u));
+    float cr = 1.0 - smoothstep(cw * 0.4, cw, c1.x);
+    float fine = 1.0 - smoothstep(0.015, 0.04, c2.x);
+    mud *= 1.0 - cr * 0.62 - fine * 0.18 * (1.0 - u);
+    // a few damp stains: seepage just past the curtain and below the weir, darker patches in the low channel
+    float seep = exp(-max(vPath.y - uGate, 0.0) / 70.0) * step(uGate - 8.0, vPath.y) + exp(-max(uWeir - vPath.y, 0.0) / 28.0) * step(vPath.y, uWeir + 8.0);
+    float patchy = smoothstep(0.62, 0.8, dn(p * vec2(0.07, 0.035) + 21.0)) * 0.55;
+    float damp = clamp((seep * (0.55 + 0.45 * n) + patchy) * (1.0 - smoothstep(0.25, 0.75, u)), 0.0, 1.0);
+    mud = mix(mud, mud * vec3(0.48, 0.44, 0.42), damp);
+    diffuseColor.rgb *= mud;
+  }`);
+  };
+  return mat;
+}
+export function buildDryBed(scene) {
+  const grp = new THREE.Group();
+  const dryMat = makeDryMaterial();
+  const spans = [[S0, RIVER_A + 6], [GATE_S - 8, S_END]];
+  for (const [a, b] of spans) {
+    for (let c0 = a; c0 < b; c0 += CHUNK_LEN) {
+      const i0 = Math.floor((c0 - S0) / SEC), i1 = Math.ceil((Math.min(c0 + CHUNK_LEN, b) - S0) / SEC);
+      const pos = [], path = [], ix = [];
+      let cols = 0;
+      for (let i = i0; i <= i1; i++) {
+        const s = S0 + i * SEC, wr = riverHalf(s);
+        frame(s, F);
+        const ks = bedKnots(wr, 3);
+        cols = ks.length;
+        for (const [lat, y] of ks) { pos.push(F.x + F.rx * lat, y + 0.12, F.z + F.rz * lat); path.push(lat, s, Math.abs(lat) / wr); }
+      }
+      for (let i = 0; i < i1 - i0; i++) for (let j = 0; j < cols - 1; j++) {
+        const q = i * cols + j; ix.push(q, q + cols, q + 1, q + 1, q + cols, q + cols + 1);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('aPath', new THREE.Float32BufferAttribute(path, 3));
+      g.setIndex(ix); g.computeVertexNormals(); g.computeBoundingSphere();
+      const m = new THREE.Mesh(g, dryMat); m.matrixAutoUpdate = false; m.receiveShadow = true;
+      m.userData = { sA: S0 + i0 * SEC, sB: S0 + i1 * SEC };
+      grp.add(m);
+    }
+  }
+  // the colonists' weir: a low concrete sill across the old bed, crest 0.7 m above the river level
+  {
+    const s0 = RIVER_A - 1.6, s1 = RIVER_A + 1.6, pos = [], col = [], ix = [];
+    const wr = riverHalf(RIVER_A), ks = bedKnots(wr * 1.02, 2);
+    const V = (s, lat, y, c) => { frame(s, F); pos.push(F.x + F.rx * lat, y, F.z + F.rz * lat); col.push(c, c * 0.97, c * 0.92); return pos.length / 3 - 1; };
+    for (let j = 0; j < ks.length - 1; j++) {
+      const [la, ya] = ks[j], [lb, yb] = ks[j + 1];
+      const tint = 0.5 + 0.08 * Math.sin(j * 2.3);
+      // dry-side face (stained darker toward the foot) + crest
+      const a0 = V(s0, la, ya - 0.5, tint * 0.7), a1 = V(s0, la, 0.7, tint), b0 = V(s0, lb, yb - 0.5, tint * 0.7), b1 = V(s0, lb, 0.7, tint);
+      ix.push(a0, b0, a1, a1, b0, b1);
+      const t0 = V(s0, la, 0.7, tint * 1.1), t1 = V(s1, la, 0.7, tint * 1.05), t2 = V(s0, lb, 0.7, tint * 1.1), t3 = V(s1, lb, 0.7, tint * 1.05);
+      ix.push(t0, t2, t1, t1, t2, t3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(ix); g.computeVertexNormals(); g.computeBoundingSphere();
+    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    m.matrixAutoUpdate = false; m.userData = { sA: s0, sB: s1 }; grp.add(m);
+  }
+  // the held-back river: a vertical water face pressed against the curtain (seen from the dry side through the field)
+  const faceMat = new THREE.ShaderMaterial({
+    fog: true, side: THREE.DoubleSide,
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }]),
+    vertexShader: `varying vec2 vUv; varying vec3 vW;
+      #include <fog_pars_vertex>
+      void main(){ vUv = uv; vec4 wp = modelMatrix * vec4(position, 1.0); vW = wp.xyz; vec4 mvPosition = viewMatrix * wp;
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `uniform float uTime; varying vec2 vUv; varying vec3 vW;
+      #include <fog_pars_fragment>
+      float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+1.0), f.x), f.y); }
+      void main(){
+        float t = uTime, y = vUv.y;                  // y: metres, 0 = river level, negative = depth
+        float d = clamp(-y / 11.0, 0.0, 1.0);
+        float sw = n(vec2(vUv.x * 0.18 + t * 0.15, y * 0.35 - t * 0.4)) * 0.6 + n(vec2(vUv.x * 0.6 - t * 0.3, y * 1.1 + t * 0.7)) * 0.4;
+        vec3 col = mix(vec3(0.10, 0.50, 0.48), vec3(0.01, 0.13, 0.16), d) * (0.75 + 0.5 * sw);
+        // caustic ripples near the top, a foamy lip pressed against the field, a red rim from the curtain
+        col += vec3(0.25, 0.4, 0.36) * pow(n(vec2(vUv.x * 0.9, y * 2.0 - t * 1.6)), 4.0) * (1.0 - d);
+        float lip = smoothstep(-0.9, -0.05, y + (n(vec2(vUv.x * 1.3, t * 1.2)) - 0.5) * 0.4);
+        col = mix(col, vec3(0.86, 0.92, 0.88), lip * 0.8);
+        col += vec3(0.35, 0.05, 0.03) * (0.4 + 0.6 * sw) * (1.0 - d * 0.5);
+        gl_FragColor = vec4(col, 1.0);
+        #include <fog_fragment>
+      }`,
+  });
+  faceMat.userData.tick = (time) => { faceMat.uniforms.uTime.value = time; };
+  {
+    const s = GATE_S - 0.45, wr = riverHalf(s), ks = bedKnots(wr * 1.03, 4), pos = [], uv = [], ix = [];
+    frame(s, F);
+    for (const [lat, yb] of ks) {
+      const yy = Math.min(yb - 0.6, -0.02);
+      pos.push(F.x + F.rx * lat, yy, F.z + F.rz * lat, F.x + F.rx * lat, 0.02, F.z + F.rz * lat);
+      uv.push(lat, yy, lat, 0.02);
+    }
+    for (let j = 0; j < ks.length - 1; j++) { const a = j * 2; ix.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(ix); g.computeBoundingSphere();
+    const m = new THREE.Mesh(g, faceMat); m.matrixAutoUpdate = false; m.userData = { sA: s - 1, sB: s + 1 };
+    grp.add(m);
+  }
+  scene.add(grp);
+  return { grp, faceMat, dryMat, meshes: grp.children };
 }

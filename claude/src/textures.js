@@ -1,6 +1,6 @@
 // Procedural canvas textures: tileable rock albedo + normal map, ship panel/wear maps.
 import * as THREE from 'three';
-import { clamp, hash2 } from './util.js?v=r26';
+import { clamp, hash2 } from './util.js?v=r27';
 
 // periodic value noise (wraps every p cells) so the textures tile seamlessly
 function pnoise(x, y, px, py) {
