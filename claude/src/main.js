@@ -1,32 +1,32 @@
-import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r32';
+import { buildBoatFX, buildBoatUnderFX, buildShockRings, WAKE_W } from './boat-fx.js?v=r33';
 // LETHE / ЛЕТА — "Delivery" prototype. Game loop, flight model, shooting, shield, LETHE spotters
 // and turrets, hazards, camera, HUD, adaptive quality.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { clamp, lerp, damp, smoothstep } from './util.js?v=r32';
+import { clamp, lerp, damp, smoothstep } from './util.js?v=r33';
 import {
   PAD_A, PAD_B, PAD_TOP, ROUTE, frame, toWorld, projectToPath, wallLat, riverHalf, bankY, maxY, narrowAt,
   ARCHES, ROCKS, ZONES, BEACONS, DRONES, MASTS, TURRETS, archBottom, archTop, zoneAt, zoneLinked, resetLevel,
   MINES, HUNTERS, BOATS, bedY, underLim, GATE_S, GATE_HOLD, GATE_BEAM, CHECKPOINTS,
   isWet, RIVER_A,
-} from './world.js?v=r32';
-import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r32';
+} from './world.js?v=r33';
+import { buildGate, ANT_HP, BREACH_HW, BREACH_TOP } from './gate.js?v=r33';
 import {
   buildMines, buildHunters, buildBoats, buildTurretGeo, buildTurretMountGeo, rimMaterial, BOAT_HL, BOAT_HW, BOAT_KEEL, BOAT_TOP, BOAT_FEATURES,
-} from './naval.js?v=r32';
+} from './naval.js?v=r33';
 import {
   buildChunks, buildWater, buildDryBed, buildFields, buildFoam, buildShafts, makeSky, makeTerrainMaterial, makeWaterMaterial, STATIC_GLOWS, VENTS, FALLS,
-} from './terrain.js?v=r32';
-import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r32';
-import { Ship, makeEnvMap } from './ship.js?v=r32';
-import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r32';
-import { input, setupInput, pollInput } from './input.js?v=r32';
-import { Post, QualityGovernor, TIERS } from './post.js?v=r32';
+} from './terrain.js?v=r33';
+import { Glows, Particles, Streaks, Beams, Debris, Motes, Wake } from './fx.js?v=r33';
+import { Ship, makeEnvMap } from './ship.js?v=r33';
+import { Audio, ENGINES, MUSIC_STYLES } from './audio.js?v=r33';
+import { input, setupInput, pollInput } from './input.js?v=r33';
+import { Post, QualityGovernor, TIERS } from './post.js?v=r33';
 // round 26: build tag for cache-busting. Every relative import / the main script / the manifest carry ?v=<BUILD>;
 // tools/bump-build.sh <tag> rewrites them all (and this line) in one go.
-export const BUILD = 'r32';
-import { films } from './films.js?v=r32';   // round 29: Part 1 films overlay
-import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r32';   // tx: `t` is a common local name here (phase timers, torpedoes)
+export const BUILD = 'r33';
+import { films } from './films.js?v=r33';   // round 29: Part 1 films overlay
+import { t as tx, onLang, applyDom, setLang, getLang, LANGS, i18n } from './i18n.js?v=r33';   // tx: `t` is a common local name here (phase timers, torpedoes)
 applyDom();   // round 25: localise the static DOM before the first frame
 
 THREE.ColorManagement.enabled = false;
@@ -3924,6 +3924,7 @@ function syncSnd(muted) {
   hud.snd.querySelector('.w1').style.display = hud.snd.querySelector('.w2').style.display = muted ? 'none' : '';
 }
 audio.listeners.push(syncSnd);
+films.bindAudio(audio);   // round 33: films follow the game mute / volume
 syncSnd(audio.muted);
 hud.snd.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); audio.init(); audio.toggleMute(); });
 // ---- engine sound presets: start-screen segmented control (with audition), HUD gear button, V key
