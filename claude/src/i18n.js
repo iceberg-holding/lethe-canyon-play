@@ -1,18 +1,18 @@
 // Round 25: plain key-based i18n. One static ES module per language in ./lang (no fetches, works offline).
 // t(key, {params}) looks the key up in the current language, falls back to English (console.warn once per key).
 // Static DOM: data-i18n="key" (innerHTML; dictionaries are our own trusted strings), data-i18n-title, data-i18n-aria.
-import en from './lang/en.js?v=r29';
-import ru from './lang/ru.js?v=r29';
-import de from './lang/de.js?v=r29';
-import es from './lang/es.js?v=r29';
-import pl from './lang/pl.js?v=r29';
-import fr from './lang/fr.js?v=r29';
-import ptBR from './lang/pt-BR.js?v=r29';
-import zhHans from './lang/zh-Hans.js?v=r29';
-import ja from './lang/ja.js?v=r29';
-import ko from './lang/ko.js?v=r29';
-import hi from './lang/hi.js?v=r29';
-import id from './lang/id.js?v=r29';
+import en from './lang/en.js?v=r30';
+import ru from './lang/ru.js?v=r30';
+import de from './lang/de.js?v=r30';
+import es from './lang/es.js?v=r30';
+import pl from './lang/pl.js?v=r30';
+import fr from './lang/fr.js?v=r30';
+import ptBR from './lang/pt-BR.js?v=r30';
+import zhHans from './lang/zh-Hans.js?v=r30';
+import ja from './lang/ja.js?v=r30';
+import ko from './lang/ko.js?v=r30';
+import hi from './lang/hi.js?v=r30';
+import id from './lang/id.js?v=r30';
 
 export const LANGS = [
   { code: 'en', name: 'English' }, { code: 'ru', name: 'Русский' }, { code: 'de', name: 'Deutsch' },

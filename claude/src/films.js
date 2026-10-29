@@ -1,8 +1,8 @@
 // Round 29: the four silent Part 1 films (intro, briefing, success, fail) as a fullscreen letterboxed overlay.
 // play(name) -> Promise that resolves when the film ends, is skipped (SKIP button, tap anywhere, Esc / Enter / Space)
 // or fails to load/play (never blocks the game). While a film is on, `films.active` is true and main.js pauses its loop.
-import { t as tx } from './i18n.js?v=r29';
-const SRC = { intro: 'assets/films/intro.mp4', briefing: 'assets/films/briefing.mp4', success: 'assets/films/success.mp4', fail: 'assets/films/fail.mp4' };
+import { t as tx } from './i18n.js?v=r30';
+const SRC = { intro: 'assets/films/intro.mp4?v=r30', briefing: 'assets/films/briefing.mp4?v=r30', success: 'assets/films/success.mp4?v=r30', fail: 'assets/films/fail.mp4?v=r30' };
 const STALL_S = 12;   // nothing decoded for this long -> give up quietly
 let root = null, vid = null, skipBtn = null, done = null, cur = null, stallT = 0, lastT = -1, stallIv = 0;
 function build() {
