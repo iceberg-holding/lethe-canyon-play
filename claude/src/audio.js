@@ -529,7 +529,7 @@ export class Audio {
     try {
       const base = new URL('assets/music/', document.baseURI).href;
       if (!this.man) {
-        const r0 = await fetch(base + 'music.json?v=r33', opt);
+        const r0 = await fetch(base + 'music.json?v=r34', opt);
         if (!r0.ok) throw new Error('music.json ' + r0.status);
         this.man = await r0.json();
       }
