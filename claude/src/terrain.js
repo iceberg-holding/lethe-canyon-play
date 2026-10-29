@@ -1,12 +1,12 @@
 // Builds the canyon chunks (walls, riverbed, rocks, arches, settlements, set dressing), river
 // surface, foam, light shafts, force-field vaults and the sky. Everything static is merged per chunk.
 import * as THREE from 'three';
-import { clamp, lerp, smoothstep, noise1, noise2, hash2, rng, sanitizeNormals } from './util.js?v=r31';
+import { clamp, lerp, smoothstep, noise1, noise2, hash2, rng, sanitizeNormals } from './util.js?v=r32';
 import {
   S0, S_END, PAD_A, PAD_B, PAD_TOP, frame, toWorld, wallLat, riverHalf, rimH, basinF, bankY,
   ARCHES, ROCKS, ZONES, BEACONS, MASTS, TURRETS, DRESS, WRECK, TRIBS, archBottom, archTop, RIVER_A, GATE_S, isWet,
-} from './world.js?v=r31';
-import { rockTextures, colonialTextures } from './textures.js?v=r31';
+} from './world.js?v=r32';
+import { rockTextures, colonialTextures } from './textures.js?v=r32';
 
 const SEC = 6;              // metres between cross sections
 const CH_SEC = 40;          // sections per chunk (240 m)
