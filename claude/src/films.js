@@ -10,12 +10,12 @@
 // Sound follows the game setting (mute + volume, M key / speaker button in the film); the game's own WebAudio is
 // suspended while a film plays. If the browser refuses sound autoplay, the film still plays muted and the speaker
 // button (a user gesture) turns the voice on.
-import { t as tx, getLang } from './i18n.js?v=r34';
-const V = '?v=r34';
+import { t as tx, getLang } from './i18n.js?v=r35';
+const V = '?v=r35';
 const NAMES = ['intro', 'briefing', 'success', 'fail'];
-const VOICE = ['ru'];               // languages with a recorded voice-over
+const VOICE = ['ru', 'en'];             // languages with a recorded voice-over
 const VOICE_FALLBACK = 'ru';        // everyone else hears this one (for now: Russian voice, no subtitles)
-const SUBS = ['ru'];                // languages with subtitle files
+const SUBS = ['ru', 'en'];              // languages with subtitle files
 const STALL_S = 12;   // nothing decoded for this long -> give up quietly
 const voiceLang = () => { const l = getLang(); return VOICE.includes(l) ? l : VOICE_FALLBACK; };
 const subLang = () => { const l = getLang(); return SUBS.includes(l) ? l : null; };

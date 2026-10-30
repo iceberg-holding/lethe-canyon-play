@@ -1,7 +1,7 @@
 // Canyon spline, cross-section profile functions and procedural level layout.
 // Everything is expressed in "path space": s = distance along the canyon,
 // lat = lateral offset (right positive), y = height above river surface.
-import { clamp, lerp, smoothstep, noise1, noise2, fbm2, rng } from './util.js?v=r34';
+import { clamp, lerp, smoothstep, noise1, noise2, fbm2, rng } from './util.js?v=r35';
 
 export const S0 = -400;          // terrain starts here
 export const S_END = 8750;       // terrain ends here
